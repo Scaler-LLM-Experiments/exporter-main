@@ -645,32 +645,54 @@ async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promis
 }
 
 // Apply AI-generated names to layers in Figma
-function applyLayerRenames(renames: Array<{ id: string; newName: string }>): void {
+async function applyLayerRenames(renames: Array<{ id: string; newName: string }>): Promise<void> {
   console.log('[Plugin] applyLayerRenames called with', renames.length, 'renames');
   let successCount = 0;
   let failCount = 0;
 
   for (const rename of renames) {
-    console.log('[Plugin] Looking for node:', rename.id, '-> new name:', rename.newName);
-    const node = figma.getNodeById(rename.id);
-    console.log('[Plugin] Node found:', node ? 'yes' : 'no', node ? `(type: ${node.type})` : '');
-    if (node && 'name' in node) {
-      try {
+    try {
+      console.log('[Plugin] Looking for node:', rename.id, '-> new name:', rename.newName);
+
+      // Use getNodeByIdAsync (required for dynamic-page document access)
+      const node = await figma.getNodeByIdAsync(rename.id);
+
+      if (!node) {
+        console.warn(`[Plugin] Node ${rename.id} not found via getNodeByIdAsync`);
+        failCount++;
+        continue;
+      }
+
+      console.log('[Plugin] Node found:', node.type, 'current name:', 'name' in node ? node.name : 'N/A');
+
+      if ('name' in node) {
         const oldName = node.name;
         node.name = rename.newName;
-        console.log('[Plugin] Renamed:', oldName, '->', rename.newName);
-        successCount++;
-      } catch (error) {
-        console.error(`[Plugin] Failed to rename node ${rename.id}:`, error);
+
+        // Verify the rename worked
+        const verifyName = node.name;
+        console.log('[Plugin] Renamed:', oldName, '->', rename.newName, '| Verified:', verifyName);
+
+        if (verifyName === rename.newName) {
+          successCount++;
+          figma.notify(`Renamed: ${oldName} → ${rename.newName}`, { timeout: 1000 });
+        } else {
+          console.error('[Plugin] Rename verification failed! Expected:', rename.newName, 'Got:', verifyName);
+          failCount++;
+        }
+      } else {
+        console.warn(`[Plugin] Node ${rename.id} does not have a name property`);
         failCount++;
       }
-    } else {
-      console.warn(`[Plugin] Node not found or cannot be renamed: ${rename.id}`);
+    } catch (error) {
+      console.error(`[Plugin] Error processing node ${rename.id}:`, error);
       failCount++;
     }
   }
 
   console.log('[Plugin] Rename complete. Success:', successCount, 'Fail:', failCount);
+  figma.notify(`Renamed ${successCount} of ${renames.length} layers`, { timeout: 3000 });
+
   figma.ui.postMessage({
     type: 'renames-applied',
     successCount,
@@ -770,11 +792,13 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
   // Step 2: Apply AI-generated names to layers
   if (msg.type === 'apply-renames') {
+    figma.notify('Received rename request!', { timeout: 2000 });
     console.log('[Plugin] Received apply-renames message');
     console.log('[Plugin] Renames:', JSON.stringify(msg.renames));
     if (msg.renames && msg.renames.length > 0) {
+      figma.notify(`Applying ${msg.renames.length} renames...`, { timeout: 2000 });
       console.log('[Plugin] Applying', msg.renames.length, 'renames');
-      applyLayerRenames(msg.renames);
+      await applyLayerRenames(msg.renames);
     } else {
       console.log('[Plugin] No renames to apply');
       figma.ui.postMessage({

@@ -153,7 +153,7 @@
   }
 
   /* AI Rename Button Styles */
-  #ai-rename-export {
+  #ai-rename {
     background: linear-gradient(135deg, hsl(250 60% 50%) 0%, hsl(280 60% 50%) 100%);
     color: white;
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
@@ -270,7 +270,7 @@
   <div class="frame-name" id="frame-name">Select Frame to Export</div>
 </div>
 
-<button id="ai-rename-export">
+<button id="ai-rename">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
     <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
@@ -278,7 +278,7 @@
   <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
-  <span class="btn-text">AI Rename + Export (6 frames)</span>
+  <span class="btn-text">AI Rename Layers</span>
 </button>
 <button id="export">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
@@ -299,7 +299,7 @@
 // DOM Elements
 // ============================================
 const exportBtn = document.getElementById('export');
-const aiRenameBtn = document.getElementById('ai-rename-export');
+const aiRenameBtn = document.getElementById('ai-rename');
 const frameNameEl = document.getElementById('frame-name');
 const checkmarks = document.querySelectorAll('.checkmark');
 const progressStatus = document.getElementById('progress-status');
@@ -314,8 +314,8 @@ function setButtonState(button, state, text) {
   const btnText = button.querySelector('.btn-text');
   const spinnerIcon = button.querySelector('.spinner');
   const checkIcon = button.querySelector('.check-icon');
-  const defaultText = button.id === 'ai-rename-export'
-    ? 'AI Rename + Export (6 frames)'
+  const defaultText = button.id === 'ai-rename'
+    ? 'AI Rename Layers'
     : 'Export Only';
 
   switch(state) {
@@ -379,15 +379,15 @@ async function callRenamingAPI(layers) {
 }
 
 // ============================================
-// AI Rename + Export Flow
+// AI Rename Flow (decoupled from export)
 // ============================================
 aiRenameBtn.onclick = async () => {
-  console.log('AI Rename + Export button clicked');
+  console.log('AI Rename button clicked');
   try {
     setButtonState(aiRenameBtn, 'loading', 'Preparing...');
     showProgress('Starting AI rename process...');
 
-    // Step 1: Request layer images for renaming
+    // Request layer images for renaming
     parent.postMessage({
       pluginMessage: { type: 'export-for-renaming' }
     }, '*');
@@ -456,7 +456,7 @@ window.onmessage = async (event) => {
   }
 
   // ============================================
-  // AI Rename Flow - Step 2: Receive layers for renaming
+  // AI Rename Flow - Process layers through AI
   // ============================================
   if (msg.type === 'layers-for-renaming') {
     console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
@@ -470,7 +470,7 @@ window.onmessage = async (event) => {
       const result = await callRenamingAPI(msg.layers);
       console.log('[UI] Backend response received:', JSON.stringify(result, null, 2));
 
-      // Step 3: Send renames back to plugin
+      // Send renames back to plugin
       setButtonState(aiRenameBtn, 'loading', 'Applying names...');
       showProgress(`Applying ${result.layers.length} AI-generated names...`);
 
@@ -497,22 +497,29 @@ window.onmessage = async (event) => {
   }
 
   // ============================================
-  // AI Rename Flow - Step 4: Renames applied, now duplicate and export
+  // AI Rename Complete - show success (decoupled from export)
   // ============================================
   if (msg.type === 'renames-applied') {
     console.log('[UI] Received renames-applied:', msg);
-    setButtonState(aiRenameBtn, 'loading', 'Duplicating...');
-    showProgress(`Renamed ${msg.successCount} layers. Creating 5 copies and exporting...`);
 
-    // Trigger duplication and export
-    console.log('[UI] Sending duplicate-and-export to plugin');
-    parent.postMessage({
-      pluginMessage: {
-        type: 'duplicate-and-export',
-        format: 'png',
-        scale: 4
-      }
-    }, '*');
+    if (msg.successCount > 0) {
+      setButtonState(aiRenameBtn, 'success');
+      showProgress(`Renamed ${msg.successCount} of ${msg.totalCount} layers successfully.`);
+    } else if (msg.totalCount === 0) {
+      setButtonState(aiRenameBtn, 'default');
+      hideProgress();
+      alert('No layers found to rename.');
+    } else {
+      setButtonState(aiRenameBtn, 'default');
+      hideProgress();
+      alert(`Failed to rename layers. ${msg.failCount} errors occurred.`);
+    }
+
+    // Reset button after 2 seconds
+    setTimeout(() => {
+      setButtonState(aiRenameBtn, 'default');
+      hideProgress();
+    }, 2000);
     return;
   }
 
