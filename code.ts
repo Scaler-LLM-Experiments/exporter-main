@@ -107,6 +107,9 @@ interface EditInstruction {
   height?: number;
   scale?: number;
   position?: 'front' | 'back' | number;
+  fontFamily?: string;   // For changeFont action - Google Font family name
+  fontStyle?: string;    // For changeFont action - Regular, Bold, Italic, etc.
+  fontSize?: number;     // For changeFontSize action - size in pixels
 }
 
 interface EditVariant {
@@ -931,6 +934,12 @@ async function executeEditInstruction(
         return executeChangeOpacity(layer, instruction);
       case 'reorder':
         return executeReorder(layer, instruction);
+      case 'changeFont':
+        return await executeChangeFont(layer, instruction);
+      case 'changeFontSize':
+        return await executeChangeFontSize(layer, instruction);
+      case 'hide':
+        return executeHide(layer, instruction);
       default:
         return { success: false, error: `Unknown action: ${instruction.action}` };
     }
@@ -1133,6 +1142,76 @@ function executeReorder(
   }
 
   return { success: true };
+}
+
+// Change font family (Google Fonts only)
+async function executeChangeFont(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+
+  const textNode = layer as TextNode;
+  const fontFamily = instruction.fontFamily || 'Inter';
+  const fontStyle = instruction.fontStyle || 'Regular';
+
+  try {
+    await figma.loadFontAsync({ family: fontFamily, style: fontStyle });
+    textNode.fontName = { family: fontFamily, style: fontStyle };
+    console.log(`  Changed font to ${fontFamily} ${fontStyle}`);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `Font not available: ${fontFamily} ${fontStyle}` };
+  }
+}
+
+// Change font size
+async function executeChangeFontSize(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+  if (!instruction.fontSize) {
+    return { success: false, error: 'changeFontSize requires fontSize' };
+  }
+
+  const textNode = layer as TextNode;
+
+  try {
+    // Load current font before modifying
+    const fontName = textNode.fontName;
+    if (fontName !== figma.mixed) {
+      await figma.loadFontAsync(fontName);
+    } else {
+      // For mixed fonts, load the first character's font
+      const firstFont = textNode.getRangeFontName(0, 1);
+      if (firstFont !== figma.mixed) {
+        await figma.loadFontAsync(firstFont);
+      }
+    }
+    textNode.fontSize = instruction.fontSize;
+    console.log(`  Changed font size to ${instruction.fontSize}`);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `Failed to change font size: ${(error as Error).message}` };
+  }
+}
+
+// Hide layer (non-destructive)
+function executeHide(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if ('visible' in layer) {
+    layer.visible = false;
+    console.log(`  Hidden layer`);
+    return { success: true };
+  }
+  return { success: false, error: 'Layer does not support visibility' };
 }
 
 // ============================================
