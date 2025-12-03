@@ -126,16 +126,40 @@ function buildEditPrompt(
   frameHeight: number,
   layers: LayerMetadata[]
 ): string {
-  // Create a simplified view of layers for the prompt
-  const layerSummary = layers.map(l => ({
-    name: l.name,
-    type: l.type,
-    position: { x: Math.round(l.x), y: Math.round(l.y) },
-    size: { width: Math.round(l.width), height: Math.round(l.height) },
-    fills: l.fills?.filter(f => f.type === 'SOLID').map(f => f.color),
-    opacity: l.opacity,
-    text: l.text
-  }));
+  // Create a detailed view of layers for the prompt
+  const layerSummary = layers.map(l => {
+    const summary: Record<string, unknown> = {
+      name: l.name,
+      type: l.type,
+      position: { x: Math.round(l.x), y: Math.round(l.y) },
+      size: { width: Math.round(l.width), height: Math.round(l.height) }
+    };
+
+    // Include fill colors explicitly
+    const solidFills = l.fills?.filter(f => f.type === 'SOLID').map(f => f.color);
+    if (solidFills && solidFills.length > 0) {
+      summary.currentColor = solidFills[0]; // Primary fill color
+      if (solidFills.length > 1) {
+        summary.additionalColors = solidFills.slice(1);
+      }
+    }
+
+    // Include text content
+    if (l.text) {
+      summary.text = l.text;
+    }
+
+    // Include opacity if not 1
+    if (l.opacity !== undefined && l.opacity !== 1) {
+      summary.opacity = l.opacity;
+    }
+
+    return summary;
+  });
+
+  // Separate colored layers for emphasis
+  const coloredLayers = layerSummary.filter(l => l.currentColor);
+  const textLayers = layerSummary.filter(l => l.text);
 
   return `Generate 5 design variations for this Figma frame.
 
@@ -143,10 +167,17 @@ function buildEditPrompt(
 Name: ${frameName}
 Dimensions: ${frameWidth} x ${frameHeight} pixels
 
-## Available Layers (${layers.length} total)
+## COLORED LAYERS (${coloredLayers.length} layers with fills - CHANGE THESE for color variations!)
+${JSON.stringify(coloredLayers, null, 2)}
+
+## TEXT LAYERS (${textLayers.length} layers with text content)
+${JSON.stringify(textLayers, null, 2)}
+
+## ALL LAYERS (${layers.length} total)
 ${JSON.stringify(layerSummary, null, 2)}
 
-Remember: Target layers by their EXACT name from the list above. Return ONLY valid JSON.`;
+IMPORTANT: For color scheme changes, you MUST modify ALL layers listed in "COLORED LAYERS" above.
+Target layers by their EXACT name. Return ONLY valid JSON.`;
 }
 
 // Parse and validate the AI response
