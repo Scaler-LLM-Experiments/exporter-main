@@ -1,7 +1,7 @@
 // Frame Exporter Plugin
 // Exports a selected frame with all its layers as PNGs and metadata as JSON
 
-figma.showUI(__html__, { width: 320, height: 360 });
+figma.showUI(__html__, { width: 560, height: 560 });
 
 // Send initial selection state
 function updateSelectionState() {
@@ -1928,6 +1928,157 @@ async function applyEditVariants(
 // Message Handler
 // ============================================
 
+// ============================================
+// Break Groups Apart
+// ============================================
+
+// Recursively flatten all groups in the selection
+async function breakGroupsApart(): Promise<{ groupCount: number; layerCount: number }> {
+  const selection = figma.currentPage.selection;
+
+  if (selection.length === 0) {
+    return { groupCount: 0, layerCount: 0 };
+  }
+
+  let groupCount = 0;
+  let layerCount = 0;
+  const newSelection: SceneNode[] = [];
+
+  // Process each selected node
+  for (const node of selection) {
+    if (node.type === 'GROUP') {
+      const result = await flattenGroup(node);
+      groupCount += result.groupCount;
+      layerCount += result.layerCount;
+      newSelection.push(...result.layers);
+    } else {
+      // Keep non-group nodes in selection
+      newSelection.push(node);
+    }
+  }
+
+  // Update selection to show ungrouped layers
+  figma.currentPage.selection = newSelection;
+
+  return { groupCount, layerCount };
+}
+
+// Recursively flatten a single group
+async function flattenGroup(group: GroupNode): Promise<{ groupCount: number; layerCount: number; layers: SceneNode[] }> {
+  let groupCount = 1; // Count this group
+  let layerCount = 0;
+  const flattenedLayers: SceneNode[] = [];
+
+  // Get the parent to move children to
+  const parent = group.parent;
+  if (!parent || !('insertChild' in parent)) {
+    return { groupCount: 0, layerCount: 0, layers: [] };
+  }
+
+  // Get the index where the group is in the parent
+  const groupIndex = parent.children.indexOf(group);
+
+  // Process children in reverse order to maintain visual stacking order
+  const children = [...group.children].reverse();
+
+  for (const child of children) {
+    if (child.type === 'GROUP') {
+      // Recursively flatten nested groups
+      const result = await flattenGroup(child);
+      groupCount += result.groupCount;
+      layerCount += result.layerCount;
+      flattenedLayers.push(...result.layers);
+    } else {
+      // Move non-group child to parent at the group's position
+      parent.insertChild(groupIndex, child);
+      layerCount++;
+      flattenedLayers.push(child);
+    }
+  }
+
+  // Remove the now-empty group
+  group.remove();
+
+  return { groupCount, layerCount, layers: flattenedLayers };
+}
+
+// ============================================
+// Rasterize Selection
+// ============================================
+
+// Convert selected objects to 4x resolution raster images
+async function rasterizeSelection(): Promise<number> {
+  const selection = figma.currentPage.selection;
+
+  if (selection.length === 0) {
+    return 0;
+  }
+
+  let rasterizedCount = 0;
+  const newSelection: SceneNode[] = [];
+
+  for (const node of selection) {
+    // Skip nodes that can't be exported
+    if (!('exportAsync' in node)) {
+      continue;
+    }
+
+    try {
+      // Store original properties
+      const originalName = node.name;
+      const originalX = node.x;
+      const originalY = node.y;
+      const originalWidth = node.width;
+      const originalHeight = node.height;
+      const parent = node.parent;
+
+      if (!parent || !('insertChild' in parent)) {
+        continue;
+      }
+
+      // Get the index of the original node
+      const originalIndex = parent.children.indexOf(node);
+
+      // Export at 4x resolution
+      const imageBytes = await node.exportAsync({
+        format: 'PNG',
+        constraint: { type: 'SCALE', value: 4 }
+      });
+
+      // Create a rectangle to hold the image
+      const rect = figma.createRectangle();
+      rect.name = originalName;
+      rect.x = originalX;
+      rect.y = originalY;
+      rect.resize(originalWidth, originalHeight);
+
+      // Create image fill from exported bytes
+      const image = figma.createImage(imageBytes);
+      rect.fills = [{
+        type: 'IMAGE',
+        imageHash: image.hash,
+        scaleMode: 'FILL'
+      }];
+
+      // Insert at the same position in the layer stack
+      parent.insertChild(originalIndex, rect);
+
+      // Remove the original node
+      node.remove();
+
+      newSelection.push(rect);
+      rasterizedCount++;
+    } catch (error) {
+      console.error(`Failed to rasterize "${node.name}":`, error);
+    }
+  }
+
+  // Update selection to show new rasterized layers
+  figma.currentPage.selection = newSelection;
+
+  return rasterizedCount;
+}
+
 interface PluginMessage {
   type: string;
   format?: string;
@@ -1941,6 +2092,45 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
   if (msg.type === 'cancel') {
     figma.closePlugin();
+    return;
+  }
+
+  // ============================================
+  // Break Groups Apart
+  // ============================================
+  if (msg.type === 'break-groups') {
+    try {
+      const result = await breakGroupsApart();
+      figma.ui.postMessage({
+        type: 'groups-broken',
+        groupCount: result.groupCount,
+        layerCount: result.layerCount
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to break groups: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // ============================================
+  // Rasterize Selection
+  // ============================================
+  if (msg.type === 'rasterize-selection') {
+    try {
+      const count = await rasterizeSelection();
+      figma.ui.postMessage({
+        type: 'rasterize-complete',
+        count: count
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to rasterize: ' + (error as Error).message
+      });
+    }
     return;
   }
 

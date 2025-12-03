@@ -175,6 +175,52 @@
     opacity: 0.6;
   }
 
+  /* Break Groups Button Styles */
+  #break-groups {
+    background: linear-gradient(135deg, hsl(180 60% 45%) 0%, hsl(200 60% 50%) 100%);
+    color: white;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    margin-bottom: 0.5rem;
+  }
+
+  #break-groups:hover:not(:disabled) {
+    background: linear-gradient(135deg, hsl(180 60% 40%) 0%, hsl(200 60% 45%) 100%);
+  }
+
+  #break-groups:active:not(:disabled) {
+    background: linear-gradient(135deg, hsl(180 60% 35%) 0%, hsl(200 60% 40%) 100%);
+  }
+
+  #break-groups:disabled {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  /* Rasterize Button Styles */
+  #rasterize {
+    background: linear-gradient(135deg, hsl(145 60% 42%) 0%, hsl(160 60% 45%) 100%);
+    color: white;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    margin-bottom: 0.5rem;
+  }
+
+  #rasterize:hover:not(:disabled) {
+    background: linear-gradient(135deg, hsl(145 60% 37%) 0%, hsl(160 60% 40%) 100%);
+  }
+
+  #rasterize:active:not(:disabled) {
+    background: linear-gradient(135deg, hsl(145 60% 32%) 0%, hsl(160 60% 35%) 100%);
+  }
+
+  #rasterize:disabled {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
   /* Generate Edits Button Styles */
   #generate-edits {
     background: linear-gradient(135deg, hsl(30 80% 50%) 0%, hsl(45 80% 50%) 100%);
@@ -299,6 +345,26 @@
   <div class="frame-name" id="frame-name">Select Frame to Export</div>
 </div>
 
+<button id="break-groups">
+  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
+  </svg>
+  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+  <span class="btn-text">Break Groups Apart</span>
+</button>
+<button id="rasterize">
+  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
+  </svg>
+  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+  <span class="btn-text">Rasterize Selection (4x)</span>
+</button>
 <button id="ai-rename">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -340,6 +406,8 @@
   const exportBtn = document.getElementById('export');
   const aiRenameBtn = document.getElementById('ai-rename');
   const generateEditsBtn = document.getElementById('generate-edits');
+  const breakGroupsBtn = document.getElementById('break-groups');
+  const rasterizeBtn = document.getElementById('rasterize');
   const frameNameEl = document.getElementById('frame-name');
   const checkmarks = document.querySelectorAll('.checkmark');
   const progressStatus = document.getElementById('progress-status');
@@ -375,6 +443,10 @@
       defaultText = 'AI Rename Layers';
     } else if (button.id === 'generate-edits') {
       defaultText = 'Generate Edits (5 variants)';
+    } else if (button.id === 'break-groups') {
+      defaultText = 'Break Groups Apart';
+    } else if (button.id === 'rasterize') {
+      defaultText = 'Rasterize Selection (4x)';
     }
 
     switch (state) {
@@ -470,6 +542,46 @@
 
     return response.json();
   }
+
+  // ============================================
+  // Break Groups Apart Flow
+  // ============================================
+  breakGroupsBtn.onclick = () => {
+    console.log('Break Groups button clicked');
+    try {
+      setButtonState(breakGroupsBtn, 'loading', 'Breaking groups...');
+      showProgress('Breaking groups apart...');
+
+      parent.postMessage({
+        pluginMessage: { type: 'break-groups' }
+      }, '*');
+    } catch (e) {
+      console.error('Break Groups error:', e);
+      setButtonState(breakGroupsBtn, 'default');
+      hideProgress();
+      alert('Error: ' + e.message);
+    }
+  };
+
+  // ============================================
+  // Rasterize Selection Flow
+  // ============================================
+  rasterizeBtn.onclick = () => {
+    console.log('Rasterize button clicked');
+    try {
+      setButtonState(rasterizeBtn, 'loading', 'Rasterizing...');
+      showProgress('Converting to raster images at 4x resolution...');
+
+      parent.postMessage({
+        pluginMessage: { type: 'rasterize-selection' }
+      }, '*');
+    } catch (e) {
+      console.error('Rasterize error:', e);
+      setButtonState(rasterizeBtn, 'default');
+      hideProgress();
+      alert('Error: ' + e.message);
+    }
+  };
 
   // ============================================
   // AI Rename Flow (decoupled from export)
@@ -906,6 +1018,44 @@
     }
 
     // ============================================
+    // Groups Broken (Break Groups complete)
+    // ============================================
+    if (msg.type === 'groups-broken') {
+      setButtonState(breakGroupsBtn, 'success');
+      if (msg.groupCount > 0) {
+        showProgress(`Ungrouped ${msg.groupCount} groups into ${msg.layerCount} layers.`);
+      } else {
+        showProgress('No groups found in selection.');
+      }
+      console.log(`[UI] Broke ${msg.groupCount} groups into ${msg.layerCount} layers`);
+
+      setTimeout(() => {
+        setButtonState(breakGroupsBtn, 'default');
+        hideProgress();
+      }, 2000);
+      return;
+    }
+
+    // ============================================
+    // Rasterize Complete
+    // ============================================
+    if (msg.type === 'rasterize-complete') {
+      setButtonState(rasterizeBtn, 'success');
+      if (msg.count > 0) {
+        showProgress(`Rasterized ${msg.count} objects at 4x resolution.`);
+      } else {
+        showProgress('No objects found to rasterize.');
+      }
+      console.log(`[UI] Rasterized ${msg.count} objects`);
+
+      setTimeout(() => {
+        setButtonState(rasterizeBtn, 'default');
+        hideProgress();
+      }, 2000);
+      return;
+    }
+
+    // ============================================
     // Error Handler
     // ============================================
     if (msg.type === 'error') {
@@ -913,6 +1063,8 @@
       setButtonState(exportBtn, 'default');
       setButtonState(aiRenameBtn, 'default');
       setButtonState(generateEditsBtn, 'default');
+      setButtonState(breakGroupsBtn, 'default');
+      setButtonState(rasterizeBtn, 'default');
       hideProgress();
     }
   };
