@@ -149,6 +149,7 @@ interface EditVariant {
   humanPrompt: string;
   theme: string;
   instructions: EditInstruction[];
+  readableInstructions?: string;  // Human-readable directive version from AI
 }
 
 // Helper function to create a safe filename from layer name
@@ -1885,74 +1886,256 @@ function executeGenerateImage(
 // Generate Edits Orchestrator
 // ============================================
 
-// Helper to create a styled label card below a frame
+// Format a single instruction into a readable prose fragment
+function formatInstructionProse(instruction: EditInstruction): string {
+  const { action, target, ...params } = instruction;
+  const layerName = target.replace(/_/g, ' ');
+
+  switch (action) {
+    case 'changeFill':
+      const opacity = params.opacity !== undefined && params.opacity !== 1
+        ? ` at ${Math.round(params.opacity * 100)}% opacity` : '';
+      return `changed "${layerName}" fill to ${params.color}${opacity}`;
+
+    case 'changeStroke':
+      return `updated "${layerName}" stroke to ${params.color}${params.weight ? ` (${params.weight}px)` : ''}`;
+
+    case 'addStroke':
+      return `added a ${params.color} stroke${params.weight ? ` at ${params.weight}px` : ''} to "${layerName}"`;
+
+    case 'removeStroke':
+      return `removed stroke from "${layerName}"`;
+
+    case 'removeFill':
+      return `removed fill from "${layerName}"`;
+
+    case 'addGradient':
+      return `applied a gradient (${params.colors?.join(' to ')}) to "${layerName}"`;
+
+    case 'changeOpacity':
+      return `set "${layerName}" opacity to ${Math.round((params.opacity || 0) * 100)}%`;
+
+    case 'changeText':
+      const textPreview = params.content && params.content.length > 30
+        ? `"${params.content.substring(0, 30)}..."`
+        : `"${params.content}"`;
+      return `changed "${layerName}" text to ${textPreview}`;
+
+    case 'changeFont':
+      return `changed "${layerName}" font to ${params.fontFamily}${params.fontStyle ? ` ${params.fontStyle}` : ''}`;
+
+    case 'changeFontSize':
+      return `resized "${layerName}" text to ${params.fontSize}px`;
+
+    case 'changeTextAlign':
+      return `aligned "${layerName}" text to ${params.align}`;
+
+    case 'changeTextCase':
+      return `transformed "${layerName}" to ${params.textCase}case`;
+
+    case 'changeLineHeight':
+      return `adjusted "${layerName}" line height to ${params.lineHeight}`;
+
+    case 'changeLetterSpacing':
+      return `set "${layerName}" letter spacing to ${params.letterSpacing}px`;
+
+    case 'move':
+      return `repositioned "${layerName}" to (${params.x}, ${params.y})`;
+
+    case 'resize':
+      if (params.scale) {
+        return `scaled "${layerName}" by ${params.scale}x`;
+      }
+      return `resized "${layerName}" to ${params.width}×${params.height}`;
+
+    case 'alignTo':
+      const alignParts = [];
+      if (params.horizontal) alignParts.push(params.horizontal);
+      if (params.vertical) alignParts.push(params.vertical);
+      return `aligned "${layerName}" to ${alignParts.join(' ')}`;
+
+    case 'rotate':
+      return `rotated "${layerName}" by ${params.angle}°`;
+
+    case 'changeCornerRadius':
+      return `set "${layerName}" corner radius to ${params.radius}px`;
+
+    case 'addShadow':
+      return `added shadow to "${layerName}" (blur: ${params.blur}px)`;
+
+    case 'addInnerShadow':
+      return `added inner shadow to "${layerName}"`;
+
+    case 'removeShadow':
+      return `removed shadow from "${layerName}"`;
+
+    case 'addBlur':
+      return `applied ${params.blur}px blur to "${layerName}"`;
+
+    case 'addBackgroundBlur':
+      return `added glassmorphism effect to "${layerName}" (${params.backgroundBlur}px blur)`;
+
+    case 'changeBlendMode':
+      return `changed "${layerName}" blend mode to ${params.blendMode}`;
+
+    case 'hide':
+      return `hidden "${layerName}"`;
+
+    case 'show':
+      return `revealed "${layerName}"`;
+
+    case 'delete':
+      return `removed "${layerName}"`;
+
+    case 'duplicate':
+      return `duplicated "${layerName}"`;
+
+    case 'reorder':
+      return `moved "${layerName}" to ${params.position}`;
+
+    case 'flipHorizontal':
+      return `flipped "${layerName}" horizontally`;
+
+    case 'flipVertical':
+      return `flipped "${layerName}" vertically`;
+
+    case 'generateImage':
+      const promptPreview = params.imagePrompt && params.imagePrompt.length > 40
+        ? params.imagePrompt.substring(0, 40) + '...'
+        : params.imagePrompt;
+      return `generated new image for "${layerName}": ${promptPreview}`;
+
+    default:
+      return `applied ${action} to "${layerName}"`;
+  }
+}
+
+// Format all instructions into a readable paragraph
+function formatInstructionsAsParagraph(instructions: EditInstruction[]): string {
+  if (instructions.length === 0) return 'No changes applied.';
+
+  const phrases = instructions.map(inst => formatInstructionProse(inst));
+
+  // Join with commas and 'and' for the last item
+  if (phrases.length === 1) {
+    return phrases[0].charAt(0).toUpperCase() + phrases[0].slice(1) + '.';
+  }
+
+  const allButLast = phrases.slice(0, -1).join(', ');
+  const last = phrases[phrases.length - 1];
+
+  return allButLast.charAt(0).toUpperCase() + allButLast.slice(1) + ', and ' + last + '.';
+}
+
+// Helper to create a styled label card above a frame (top-left position)
 async function createPromptLabel(
   frame: FrameNode | ComponentNode,
-  promptText: string,
-  theme: string
+  theme: string,
+  humanPrompt: string,
+  readableInstructions: string,
+  instructionCount: number
 ): Promise<number> {
   try {
-    // Load fonts
+    // Load fonts - use Inter which is reliably available
     await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
     await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+    await figma.loadFontAsync({ family: 'Inter', style: 'Medium' });
 
     // Create a container frame for the label
     const labelFrame = figma.createFrame();
     labelFrame.name = `${frame.name}_prompt_card`;
 
-    // Position below the frame with 24px gap
-    labelFrame.x = frame.x;
-    labelFrame.y = frame.y + frame.height + 24;
-
     // Set up auto-layout for padding
     labelFrame.layoutMode = 'VERTICAL';
     labelFrame.primaryAxisSizingMode = 'AUTO';
     labelFrame.counterAxisSizingMode = 'FIXED';
-    labelFrame.resize(frame.width, 100); // Width matches frame, height auto
-    labelFrame.paddingTop = 20;
-    labelFrame.paddingBottom = 20;
-    labelFrame.paddingLeft = 24;
-    labelFrame.paddingRight = 24;
-    labelFrame.itemSpacing = 12;
+    labelFrame.resize(Math.min(frame.width, 600), 100); // Max width 600px for readability
+    labelFrame.paddingTop = 24;
+    labelFrame.paddingBottom = 24;
+    labelFrame.paddingLeft = 28;
+    labelFrame.paddingRight = 28;
+    labelFrame.itemSpacing = 16;
 
     // White background
     labelFrame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
 
     // Border (stroke)
-    labelFrame.strokes = [{ type: 'SOLID', color: { r: 0.85, g: 0.85, b: 0.85 } }];
+    labelFrame.strokes = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
     labelFrame.strokeWeight = 1;
 
     // Rounded corners
     labelFrame.cornerRadius = 12;
 
+    // Add subtle shadow for depth
+    labelFrame.effects = [{
+      type: 'DROP_SHADOW',
+      color: { r: 0, g: 0, b: 0, a: 0.08 },
+      offset: { x: 0, y: 4 },
+      radius: 12,
+      spread: 0,
+      visible: true,
+      blendMode: 'NORMAL'
+    }];
+
     // Create theme title
     const themeText = figma.createText();
-    themeText.characters = theme;
-    themeText.fontSize = 20;
     themeText.fontName = { family: 'Inter', style: 'Bold' };
+    themeText.characters = theme;
+    themeText.fontSize = 22;
     themeText.fills = [{ type: 'SOLID', color: { r: 0.1, g: 0.1, b: 0.1 } }];
     themeText.layoutAlign = 'STRETCH';
     themeText.textAutoResize = 'HEIGHT';
 
-    // Create prompt description
-    const promptTextNode = figma.createText();
-    promptTextNode.characters = promptText;
-    promptTextNode.fontSize = 16;
-    promptTextNode.fontName = { family: 'Inter', style: 'Regular' };
-    promptTextNode.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
-    promptTextNode.layoutAlign = 'STRETCH';
-    promptTextNode.textAutoResize = 'HEIGHT';
+    // Create AI summary (humanPrompt)
+    const summaryText = figma.createText();
+    summaryText.fontName = { family: 'Inter', style: 'Medium' };
+    summaryText.characters = humanPrompt;
+    summaryText.fontSize = 15;
+    summaryText.fills = [{ type: 'SOLID', color: { r: 0.25, g: 0.25, b: 0.25 } }];
+    summaryText.layoutAlign = 'STRETCH';
+    summaryText.textAutoResize = 'HEIGHT';
+    summaryText.lineHeight = { value: 150, unit: 'PERCENT' };
 
-    // Set line height for readability
-    promptTextNode.lineHeight = { value: 150, unit: 'PERCENT' };
+    // Create a divider line
+    const divider = figma.createFrame();
+    divider.name = 'divider';
+    divider.resize(labelFrame.width - 56, 1);
+    divider.fills = [{ type: 'SOLID', color: { r: 0.9, g: 0.9, b: 0.9 } }];
+    divider.layoutAlign = 'STRETCH';
+
+    // Create changes label
+    const changesLabel = figma.createText();
+    changesLabel.fontName = { family: 'Inter', style: 'Bold' };
+    changesLabel.characters = `${instructionCount} Changes Applied`;
+    changesLabel.fontSize = 12;
+    changesLabel.fills = [{ type: 'SOLID', color: { r: 0.5, g: 0.5, b: 0.5 } }];
+    changesLabel.layoutAlign = 'STRETCH';
+    changesLabel.textAutoResize = 'HEIGHT';
+    changesLabel.letterSpacing = { value: 0.5, unit: 'PIXELS' };
+
+    // Create instructions paragraph (human-readable from AI)
+    const instructionsText = figma.createText();
+    instructionsText.fontName = { family: 'Inter', style: 'Regular' };
+    instructionsText.characters = readableInstructions;
+    instructionsText.fontSize = 14;
+    instructionsText.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    instructionsText.layoutAlign = 'STRETCH';
+    instructionsText.textAutoResize = 'HEIGHT';
+    instructionsText.lineHeight = { value: 160, unit: 'PERCENT' };
 
     // Add text nodes to frame
     labelFrame.appendChild(themeText);
-    labelFrame.appendChild(promptTextNode);
+    labelFrame.appendChild(summaryText);
+    labelFrame.appendChild(divider);
+    labelFrame.appendChild(changesLabel);
+    labelFrame.appendChild(instructionsText);
+
+    // Position above and to the left of the frame
+    labelFrame.x = frame.x;
+    labelFrame.y = frame.y - labelFrame.height - 32; // 32px gap above frame
 
     // Return the height of the label card for spacing calculations
-    // Need to wait a tick for auto-layout to calculate
-    return labelFrame.height;
+    return labelFrame.height + 32; // Include the gap
   } catch (error) {
     console.warn('Could not create prompt label:', error);
     return 0;
@@ -1972,11 +2155,12 @@ async function applyEditVariants(
   });
 
   // Spacing configuration
-  const VERTICAL_SPACING = 500; // 500px between variants (excluding prompt card)
-  const PROMPT_CARD_GAP = 24; // Gap between frame and its prompt card
+  const VERTICAL_SPACING = 500; // 500px between variant frames
+  const LABEL_ESTIMATED_HEIGHT = 250; // Estimated height for the label card above each frame
 
   // Track cumulative Y position for vertical stacking
-  let currentY = originalFrame.y + originalFrame.height + VERTICAL_SPACING;
+  // Add extra space for the first variant's label that will appear above it
+  let currentY = originalFrame.y + originalFrame.height + VERTICAL_SPACING + LABEL_ESTIMATED_HEIGHT;
 
   // Create duplicates and apply different edits to each
   for (let i = 0; i < variants.length; i++) {
@@ -2012,11 +2196,19 @@ async function applyEditVariants(
 
     console.log(`[Plugin] Variant ${i + 1} (${variant.theme}): Applied ${successCount}/${variant.instructions.length} edits`);
 
-    // Create styled prompt label card below the variant frame
-    const labelHeight = await createPromptLabel(clone, variant.humanPrompt, variant.theme);
+    // Create styled prompt label card above the variant frame
+    // Use readableInstructions from AI, fallback to formatted paragraph if not available
+    const readableText = variant.readableInstructions || formatInstructionsAsParagraph(variant.instructions);
+    const labelHeight = await createPromptLabel(
+      clone,
+      variant.theme,
+      variant.humanPrompt,
+      readableText,
+      variant.instructions.length
+    );
 
-    // Calculate next Y position: frame height + gap + label height + vertical spacing
-    currentY = clone.y + clone.height + PROMPT_CARD_GAP + labelHeight + VERTICAL_SPACING;
+    // Calculate next Y position: frame height + spacing + estimated label height for next variant
+    currentY = clone.y + clone.height + VERTICAL_SPACING + LABEL_ESTIMATED_HEIGHT;
 
     figma.notify(`Variant ${i + 1}: ${variant.theme} (${successCount} edits)`, { timeout: 1500 });
   }

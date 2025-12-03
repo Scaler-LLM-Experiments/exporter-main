@@ -165,6 +165,11 @@ interface EditInstruction {
   height?: number;
   scale?: number;
   position?: 'front' | 'back' | number;
+  // Typography properties
+  fontFamily?: string;
+  fontStyle?: string;
+  fontSize?: number;
+  textCase?: string;
   // Image generation properties
   imagePrompt?: string;           // Prompt for AI image generation
   generatedImageBase64?: string;  // Base64 of generated image (populated by server)
@@ -175,6 +180,7 @@ interface EditVariant {
   humanPrompt: string;
   theme: string;
   instructions: EditInstruction[];
+  readableInstructions?: string;  // Human-readable directive version of instructions
 }
 
 // Load system prompt from file
@@ -265,9 +271,55 @@ Target layers by their EXACT name. Return ONLY valid JSON.`;
 function parseAndValidateVariants(responseText: string, layers: LayerMetadata[]): EditVariant[] {
   // Clean up potential markdown formatting
   let cleaned = responseText.trim();
-  if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+
+  // Remove markdown code blocks if present
+  if (cleaned.includes('```json')) {
+    const jsonMatch = cleaned.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      cleaned = jsonMatch[1].trim();
+    }
+  } else if (cleaned.includes('```')) {
+    const codeMatch = cleaned.match(/```\s*([\s\S]*?)\s*```/);
+    if (codeMatch) {
+      cleaned = codeMatch[1].trim();
+    }
   }
+
+  // If still not starting with {, try to find JSON object in the response
+  if (!cleaned.startsWith('{')) {
+    // Look for the start of the JSON object
+    const jsonStart = cleaned.indexOf('{"variants"');
+    if (jsonStart === -1) {
+      // Try finding just the opening brace of an object
+      const braceStart = cleaned.indexOf('{');
+      if (braceStart !== -1) {
+        cleaned = cleaned.substring(braceStart);
+      }
+    } else {
+      cleaned = cleaned.substring(jsonStart);
+    }
+  }
+
+  // Find the matching closing brace
+  if (cleaned.startsWith('{')) {
+    let braceCount = 0;
+    let endIndex = -1;
+
+    for (let i = 0; i < cleaned.length; i++) {
+      if (cleaned[i] === '{') braceCount++;
+      if (cleaned[i] === '}') braceCount--;
+      if (braceCount === 0) {
+        endIndex = i + 1;
+        break;
+      }
+    }
+
+    if (endIndex !== -1) {
+      cleaned = cleaned.substring(0, endIndex);
+    }
+  }
+
+  console.log('Cleaned JSON (first 500 chars):', cleaned.substring(0, 500));
 
   const parsed = JSON.parse(cleaned);
 
@@ -410,6 +462,167 @@ async function processImageGenerations(
       }
     }
   }
+  return variants;
+}
+
+// Convert hex color to human-readable name
+function hexToColorName(hex: string): string {
+  const colorMap: Record<string, string> = {
+    '#FFFFFF': 'white', '#FFF': 'white',
+    '#000000': 'black', '#000': 'black',
+    '#FF0000': 'red', '#F00': 'red',
+    '#00FF00': 'green', '#0F0': 'green',
+    '#0000FF': 'blue', '#00F': 'blue',
+    '#FFFF00': 'yellow', '#FF0': 'yellow',
+    '#FF00FF': 'magenta', '#F0F': 'magenta',
+    '#00FFFF': 'cyan', '#0FF': 'cyan',
+    '#FFA500': 'orange',
+    '#800080': 'purple',
+    '#FFC0CB': 'pink',
+    '#A52A2A': 'brown',
+    '#808080': 'gray', '#GREY': 'gray',
+    '#C0C0C0': 'silver',
+    '#FFD700': 'gold',
+    '#CCFF00': 'neon yellow',
+    '#FF6B6B': 'coral red',
+    '#4ECDC4': 'teal',
+  };
+
+  const upper = hex.toUpperCase();
+  if (colorMap[upper]) return colorMap[upper];
+
+  // Analyze the hex to give a descriptive name
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+
+  const brightness = (r + g + b) / 3;
+
+  if (brightness < 40) return 'very dark (near black)';
+  if (brightness < 80) return 'dark';
+  if (brightness > 220) return 'very light (near white)';
+  if (brightness > 180) return 'light';
+
+  // Determine dominant color
+  if (r > g && r > b) {
+    if (r > 200) return g > 150 ? 'orange/yellow' : 'bright red';
+    return 'reddish';
+  }
+  if (g > r && g > b) {
+    return g > 200 ? 'bright green' : 'greenish';
+  }
+  if (b > r && b > g) {
+    return b > 200 ? 'bright blue' : 'bluish';
+  }
+
+  return 'neutral tone';
+}
+
+// Humanize instructions using Gemini 2.5 Flash
+async function humanizeInstructions(variant: EditVariant): Promise<string> {
+  // First, create a simplified version of the instructions
+  const simplifiedInstructions = variant.instructions.map(inst => {
+    const layerName = inst.target.replace(/_/g, ' ');
+
+    switch (inst.action) {
+      case 'changeFill':
+        return `Change "${layerName}" color to ${hexToColorName(inst.color || '')}`;
+      case 'addGradient':
+        return `Apply a gradient to "${layerName}"`;
+      case 'changeStroke':
+      case 'addStroke':
+        return `Add a ${hexToColorName(inst.color || '')} border to "${layerName}"`;
+      case 'removeStroke':
+        return `Remove border from "${layerName}"`;
+      case 'changeText':
+        return `Change "${layerName}" text to "${inst.content}"`;
+      case 'changeFont':
+        return `Change "${layerName}" font to ${inst.fontFamily}`;
+      case 'changeFontSize':
+        return `Resize "${layerName}" text to ${inst.fontSize}px`;
+      case 'changeTextCase':
+        return `Transform "${layerName}" to ${inst.textCase}`;
+      case 'move':
+        return `Reposition "${layerName}"`;
+      case 'resize':
+        return `Resize "${layerName}"`;
+      case 'addShadow':
+        return `Add shadow to "${layerName}"`;
+      case 'addBackgroundBlur':
+        return `Add glassmorphism effect to "${layerName}"`;
+      case 'changeCornerRadius':
+        return `Round the corners of "${layerName}"`;
+      case 'changeOpacity':
+        return `Adjust "${layerName}" transparency`;
+      case 'hide':
+        return `Hide "${layerName}"`;
+      case 'generateImage':
+        return `Generate new AI image for "${layerName}"`;
+      default:
+        return `Modify "${layerName}"`;
+    }
+  });
+
+  const instructionsList = simplifiedInstructions.join('. ') + '.';
+
+  // Now call Gemini to make it more natural and directive
+  const prompt = `Convert these design instructions into a clear, concise paragraph of directives. Write as if you're giving instructions to a designer. Use plain language, no technical jargon. Don't mention hex codes. Keep it brief but complete.
+
+Theme: ${variant.theme}
+Summary: ${variant.humanPrompt}
+
+Raw instructions:
+${instructionsList}
+
+Write 2-3 sentences maximum. Start directly with the instructions, no preamble.`;
+
+  try {
+    if (AI_PROVIDER === 'openrouter') {
+      const response = await callOpenRouter({
+        model: OPENROUTER_MODELS.FAST,
+        messages: [{
+          role: 'user',
+          content: prompt
+        }],
+        temperature: 0.3,
+        max_tokens: 300
+      });
+
+      if (response.ok) {
+        const data = await response.json() as OpenRouterResponse;
+        const text = data.choices?.[0]?.message?.content?.trim();
+        if (text) {
+          return text;
+        }
+      }
+    } else if (genAI) {
+      // Direct Gemini API
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-09-2025' });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().trim();
+      if (text) {
+        return text;
+      }
+    }
+  } catch (error) {
+    console.warn('  Failed to humanize instructions:', error);
+  }
+
+  // Fallback: return the simplified version
+  return instructionsList;
+}
+
+// Process all variants to add readable instructions
+async function addReadableInstructions(variants: EditVariant[]): Promise<EditVariant[]> {
+  console.log('\n📝 Generating human-readable instructions...\n');
+
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+    console.log(`  Humanizing variant ${i + 1}: ${variant.theme}...`);
+    variant.readableInstructions = await humanizeInstructions(variant);
+    console.log(`  ✓ Done`);
+  }
+
   return variants;
 }
 
@@ -774,6 +987,9 @@ app.post('/api/generate-edits', async (req: Request, res: Response) => {
         console.log(`✅ Generated ${successfulImages}/${imageInstructions.length} images\n`);
       }
     }
+
+    // Generate human-readable instructions for each variant
+    variants = await addReadableInstructions(variants);
 
     console.log(`Generated ${variants.length} variants:`);
     variants.forEach((v, i) => {
