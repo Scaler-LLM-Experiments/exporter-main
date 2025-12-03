@@ -14,7 +14,8 @@
     "allowedDomains": [
       "https://cdnjs.cloudflare.com",
       "https://fonts.googleapis.com",
-      "https://fonts.gstatic.com"
+      "https://fonts.gstatic.com",
+      "https://asli-designer-production.up.railway.app"
     ],
     "devAllowedDomains": [
       "http://localhost:3000"
