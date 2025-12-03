@@ -2049,7 +2049,7 @@ async function createPromptLabel(
     labelFrame.layoutMode = 'VERTICAL';
     labelFrame.primaryAxisSizingMode = 'AUTO';
     labelFrame.counterAxisSizingMode = 'FIXED';
-    labelFrame.resize(Math.min(frame.width, 600), 100); // Max width 600px for readability
+    labelFrame.resize(Math.min(frame.width, 1080), 100); // Max width 1080 for readability
     labelFrame.paddingTop = 24;
     labelFrame.paddingBottom = 24;
     labelFrame.paddingLeft = 28;
