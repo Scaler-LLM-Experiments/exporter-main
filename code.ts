@@ -801,14 +801,31 @@ async function duplicateFrameAndExport(
 async function extractLayerMetadataForEdits(
   frame: FrameNode | ComponentNode
 ): Promise<LayerMetadataForAI[]> {
+  const metadata: LayerMetadataForAI[] = [];
+
+  // FIRST: Include the frame itself as "frame_background" so AI can change its color
+  const frameFills = extractFills(frame);
+  const frameStrokes = extractStrokes(frame);
+  metadata.push({
+    name: 'frame_background',
+    type: 'FRAME_BACKGROUND',
+    x: 0,
+    y: 0,
+    width: Math.round(frame.width * 100) / 100,
+    height: Math.round(frame.height * 100) / 100,
+    fills: frameFills,
+    strokes: frameStrokes,
+    opacity: frame.opacity,
+    cornerRadius: extractCornerRadius(frame)
+  });
+
+  // SECOND: Collect all child layers
   const allLayers: SceneNode[] = [];
   if ('children' in frame) {
     for (const child of frame.children) {
       collectLayers(child, allLayers);
     }
   }
-
-  const metadata: LayerMetadataForAI[] = [];
 
   for (const layer of allLayers) {
     const pos = getAbsolutePosition(layer, frame);
@@ -837,10 +854,16 @@ async function extractLayerMetadataForEdits(
 }
 
 // Find a layer node by name within a frame
+// Special case: "frame_background" returns the frame itself
 function findLayerByName(
   frame: FrameNode | ComponentNode,
   targetName: string
-): SceneNode | null {
+): SceneNode | FrameNode | ComponentNode | null {
+  // Special case: return the frame itself for background changes
+  if (targetName === 'frame_background') {
+    return frame;
+  }
+
   const allLayers: SceneNode[] = [];
   if ('children' in frame) {
     for (const child of frame.children) {
@@ -1116,14 +1139,45 @@ function executeReorder(
 // Generate Edits Orchestrator
 // ============================================
 
-// Main function to apply edit variants and create modified frames
+// Helper to create a text label below a frame
+async function createPromptLabel(
+  frame: FrameNode | ComponentNode,
+  promptText: string,
+  theme: string
+): Promise<void> {
+  try {
+    const textNode = figma.createText();
+
+    // Load a default font
+    await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+
+    // Position below the frame with some padding
+    textNode.x = frame.x;
+    textNode.y = frame.y + frame.height + 20;
+
+    // Set text content: theme name + prompt
+    textNode.characters = `${theme}: ${promptText}`;
+
+    // Style the text
+    textNode.fontSize = 14;
+    textNode.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+
+    // Constrain width to match frame
+    textNode.resize(frame.width, textNode.height);
+    textNode.textAutoResize = 'HEIGHT';
+
+    // Name the text node
+    textNode.name = `${frame.name}_prompt`;
+  } catch (error) {
+    console.warn('Could not create prompt label:', error);
+  }
+}
+
+// Main function to apply edit variants and create modified frames (no export)
 async function applyEditVariants(
   originalFrame: FrameNode | ComponentNode,
-  variants: EditVariant[],
-  format: string,
-  scale: number
+  variants: EditVariant[]
 ): Promise<void> {
-  const framesToExport: (FrameNode | ComponentNode)[] = [originalFrame];
   const originalName = originalFrame.name;
 
   figma.ui.postMessage({
@@ -1161,24 +1215,25 @@ async function applyEditVariants(
     }
 
     console.log(`[Plugin] Variant ${i + 1} (${variant.theme}): Applied ${successCount}/${variant.instructions.length} edits`);
+
+    // Create text label below the variant frame with the prompt
+    await createPromptLabel(clone, variant.humanPrompt, variant.theme);
+
     figma.notify(`Variant ${i + 1}: ${variant.theme} (${successCount} edits)`, { timeout: 1500 });
-    framesToExport.push(clone as FrameNode | ComponentNode);
   }
 
   figma.ui.postMessage({
     type: 'progress',
-    message: `Created ${variants.length} variants. Exporting ${framesToExport.length} frames...`
+    message: `Created ${variants.length} variants with labels. Select frames and use Export to download.`
   });
 
-  // Export all frames (original + variants)
-  const totalFrames = framesToExport.length;
-  for (let i = 0; i < totalFrames; i++) {
-    await exportFrame(framesToExport[i], i, totalFrames, format, scale);
-  }
-
+  // Send completion message (no export)
   figma.ui.postMessage({
-    type: 'all-exports-complete'
+    type: 'variants-created',
+    variantCount: variants.length
   });
+
+  figma.notify(`Created ${variants.length} variants! Use "Export Only" to download.`, { timeout: 4000 });
 }
 
 // ============================================
@@ -1358,9 +1413,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       await applyEditVariants(
         frames[0],
-        msg.variants,
-        msg.format || 'png',
-        msg.scale || 4
+        msg.variants
       );
     } catch (error) {
       figma.ui.postMessage({

@@ -655,14 +655,12 @@ window.onmessage = async (event) => {
 
       // Send variants back to plugin to apply
       setButtonState(generateEditsBtn, 'loading', 'Applying edits...');
-      showProgress(`Generated ${result.variants.length} variants. Applying edits and exporting...`);
+      showProgress(`Generated ${result.variants.length} variants. Applying edits to canvas...`);
 
       parent.postMessage({
         pluginMessage: {
           type: 'apply-edit-variants',
-          variants: result.variants,
-          format: 'png',
-          scale: 4
+          variants: result.variants
         }
       }, '*');
 
@@ -886,8 +884,16 @@ window.onmessage = async (event) => {
     // Show success state in all buttons (whichever was active)
     setButtonState(exportBtn, 'success');
     setButtonState(aiRenameBtn, 'success');
+    hideProgress();
+  }
+
+  // ============================================
+  // Variants Created (Generate Edits complete)
+  // ============================================
+  if (msg.type === 'variants-created') {
     setButtonState(generateEditsBtn, 'success');
     hideProgress();
+    console.log(`[UI] Created ${msg.variantCount} variants successfully`);
   }
 
   // ============================================
