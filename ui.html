@@ -1189,6 +1189,19 @@
     // All Exports Complete
     // ============================================
     if (msg.type === 'all-exports-complete') {
+      const expectedFrames = msg.totalFrames || 1;
+
+      // Check if we've received all frame data yet
+      if (frameExportData.length < expectedFrames) {
+        console.log(`[UI] Completion signal received, but only have ${frameExportData.length}/${expectedFrames} frames. Waiting...`);
+
+        // Retry after a short delay to allow frame data to be processed
+        setTimeout(() => {
+          window.postMessage({ pluginMessage: { type: 'all-exports-complete', totalFrames: expectedFrames } }, '*');
+        }, 100);
+        return;
+      }
+
       try {
         if (frameExportData.length === 0) {
           throw new Error('No frame data to export');

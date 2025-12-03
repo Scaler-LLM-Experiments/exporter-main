@@ -2665,7 +2665,8 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       // Notify UI that all exports are complete
       figma.ui.postMessage({
-        type: 'all-exports-complete'
+        type: 'all-exports-complete',
+        totalFrames: frames.length
       });
 
     } catch (error) {
