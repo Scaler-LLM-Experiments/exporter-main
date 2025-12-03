@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Figma plugin called "exporter" that exports frames and their layers as individual images (PNG or SVG) with comprehensive metadata. The plugin decomposes frames into layers, exports each layer separately, and provides both the individual layer files and a reconstructed composite image.
+This is a Figma plugin called "exporter" that exports frames and their layers as individual images (PNG or SVG) with comprehensive metadata. The plugin decomposes frames into layers, exports each layer separately, and provides both the individual layer files and a reconstructed composite image. It includes an optional AI-powered backend for layer renaming, design variation generation, and S3 upload capabilities.
 
 ## Build and Development Commands
 
@@ -28,7 +28,7 @@ Figma plugins run in two separate contexts that communicate via message passing:
 1. **Main Plugin Context** (`code.ts`):
    - Has access to the Figma document API via the global `figma` object
    - Handles layer collection, metadata extraction, and image export
-   - Cannot access browser APIs
+   - Cannot access browser APIs or make network requests
    - Compiled to `code.js` (specified in `manifest.json`)
 
 2. **UI Context** (`ui.html`):
@@ -103,34 +103,78 @@ Both reconstruction methods use the same algorithm: sort layers by z-index, appl
 
 ### AI Backend Server
 
-The plugin includes an optional AI-powered backend (`server/index.ts`) that provides two key features:
+The plugin includes an optional AI-powered backend (`server/index.ts`) that provides AI features, S3 uploads, and job tracking:
 
-1. **Backend Server Configuration**:
-   - Express server running on `localhost:3000` (configurable via `PORT` env var)
-   - Supports two AI providers: Google Gemini (direct) or OpenRouter (with multiple model options)
-   - Provider selected via `AI_PROVIDER` env var (defaults to `gemini`)
-   - Requires API keys in `server/.env` (copy from `server/.env.example`)
-   - System prompts externalized to `server/prompts/` directory for easy experimentation
+#### Backend Server Configuration
 
-2. **AI Layer Renaming** (`POST /api/rename-layers`):
-   - **Flow**: UI exports layers as 1x PNG → sends to backend → backend calls AI vision model → returns snake_case names
-   - Uses fast vision model (`gemini-2.5-flash-lite-preview` or configurable via `OPENROUTER_MODEL_FAST`)
-   - Generates concise 3-5 word names from layer images
-   - Plugin receives names and renames layers in Figma document
-   - Used in "AI Rename Layers" button workflow
+- Express server running on `localhost:3000` (configurable via `PORT` env var)
+- Supports two AI providers: Google Gemini (direct) or OpenRouter (with multiple model options)
+- Provider selected via `AI_PROVIDER` env var (defaults to `gemini`)
+- Requires API keys in `server/.env` (copy from `server/.env.example`)
+- System prompts externalized to `server/prompts/` directory for easy experimentation
+- Request body limit: 4GB to support large frame exports
+- Request timeout: 10 minutes for heavy operations
+- Includes memory monitoring middleware to track heap usage
 
-3. **AI Design Variations** (`POST /api/generate-edits`):
-   - **Flow**: UI sends frame metadata → backend calls reasoning model → returns 5 variant instructions → plugin applies edits
-   - Uses pro reasoning model (`gemini-2.0-flash` or configurable via `OPENROUTER_MODEL_PRO`)
-   - Generates 5 creative design variations with JSON edit instructions (move, changeFill, changeText, resize, etc.)
-   - Each variant includes human-readable prompt and executable instructions
-   - Optionally generates AI images for layers with `hasImageFill: true` (requires `OPENROUTER_MODEL_IMAGE`)
-   - System prompt customizable via `EDIT_PROMPT_FILE` env var (see `server/prompts/` for options)
-   - Used in "Generate Edits (5 variants)" button workflow
+#### AI Features
 
-4. **Network Access**:
-   - `devAllowedDomains` in `manifest.json` allows `localhost:3000` during development
-   - Plugin UI makes all HTTP requests (main context cannot access network)
+**1. AI Layer Renaming** (`POST /api/rename-layers`):
+- **Flow**: UI exports layers as 1x PNG → sends to backend → backend calls AI vision model → returns snake_case names
+- Uses fast vision model (`gemini-2.5-flash-lite-preview` or configurable via `OPENROUTER_MODEL_FAST`)
+- Generates concise 3-5 word names from layer images
+- **Batch processing**: Processes up to 10 layers per API call for efficiency (previously 1 layer per call)
+- Plugin receives names and renames layers in Figma document
+- 100ms delays between batches to avoid rate limiting
+- Used in "AI Rename Layers" button workflow
+
+**2. AI Design Variations** (`POST /api/generate-edits`):
+- **Flow**: UI sends frame metadata → backend calls reasoning model → returns 5 variant instructions → plugin applies edits
+- Uses pro reasoning model (`gemini-2.0-flash` or configurable via `OPENROUTER_MODEL_PRO`)
+- Generates 5 creative design variations with JSON edit instructions (move, changeFill, changeText, resize, etc.)
+- Each variant includes human-readable prompt and executable instructions
+- Optionally generates AI images for layers with `hasImageFill: true` (requires `OPENROUTER_MODEL_IMAGE`)
+- System prompt customizable via `EDIT_PROMPT_FILE` env var (see `server/prompts/` for options)
+- Used in "Generate Edits (5 variants)" button workflow
+
+#### S3 Upload and Database Tracking
+
+**3. S3 Automatic Uploads** (`POST /api/upload-to-s3`):
+- Uploads exported frame ZIPs directly to AWS S3
+- Requires AWS credentials in `server/.env` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`)
+- Optional `S3_FOLDER_PREFIX` for organizing uploads into folders
+- Supports up to 4GB file uploads (matching the request body limit)
+- Returns S3 URL upon successful upload
+- Tracks all upload jobs in PostgreSQL database
+
+**4. Database Job Tracking** (`server/lib/db.ts`):
+- Optional PostgreSQL integration for tracking all backend operations
+- Requires `DATABASE_URL` in `server/.env` (standard PostgreSQL connection string)
+- Tracks: job ID, frame name, user email, IP address, variant count, file size, duration, status
+- Gracefully degrades if database is not configured
+- Connection pool with 20 max connections, 30s idle timeout
+
+**5. Rate Limiting** (`server/lib/rateLimiter.ts`):
+- General API rate limiting: Applied to all `/api/` routes
+- Heavy operation limiting: Applied to `generate-edits` and `upload-to-s3`
+- Rename-specific limiting: Applied to `rename-layers` endpoint
+
+**6. Concurrency Control** (`server/lib/concurrency.ts`):
+- `renameLimiter`: Limits parallel rename operations
+- `imageLimiter`: Limits parallel image generation
+- `processWithConcurrency`: Helper for processing items with controlled parallelism
+
+#### Network Access
+
+- Production: `allowedDomains` in `manifest.json` includes `https://asli-designer-production.up.railway.app`
+- Development: `devAllowedDomains` allows `localhost:3000`
+- Plugin UI makes all HTTP requests (main context cannot access network)
+
+#### Deployment
+
+The server is configured for Railway deployment (`server/railway.json`):
+- Supports PostgreSQL database provisioning
+- Environment variables managed via Railway dashboard
+- Uses Railway's DATABASE_URL for automatic database connection
 
 ### Key Configuration Files
 
@@ -138,7 +182,7 @@ The plugin includes an optional AI-powered backend (`server/index.ts`) that prov
   - `main`: Entry point (`code.js`)
   - `ui`: HTML file for the interface (`ui.html`)
   - `documentAccess`: Set to "dynamic-page" (can access current page on demand)
-  - `networkAccess.allowedDomains`: Allows CDN access for JSZip and Google Fonts (Manrope font)
+  - `networkAccess.allowedDomains`: Allows CDN access for JSZip, Google Fonts (Manrope), and production Railway server
   - `networkAccess.devAllowedDomains`: Allows `localhost:3000` for AI backend during development
   - `editorType`: Only runs in Figma (not FigJam)
 
@@ -151,6 +195,10 @@ The plugin includes an optional AI-powered backend (`server/index.ts`) that prov
   - Targets ES2020 with CommonJS modules
   - Only includes `reconstruct.ts`
   - Uses Node.js module resolution
+
+- **server/tsconfig.json**: Backend server TypeScript config
+  - Separate configuration for server code
+  - Supports ES modules and Node.js types
 
 - **package.json**: Contains ESLint configuration with Figma-specific rules from `@figma/eslint-plugin-figma-plugins`
 
@@ -199,3 +247,6 @@ The plugin provides six main operations accessible via UI buttons:
 - For AI features: start backend server (`npm run server`) and configure `server/.env` with API keys
 - AI provider selection: set `AI_PROVIDER=gemini` or `AI_PROVIDER=openrouter` in `server/.env`
 - Custom prompts: create new files in `server/prompts/` and set `EDIT_PROMPT_FILE` to test different system prompts
+- S3 uploads: configure AWS credentials and bucket name in `server/.env`
+- Database tracking: set `DATABASE_URL` in `server/.env` for PostgreSQL connection
+- Production deployment: uses Railway with automatic PostgreSQL provisioning

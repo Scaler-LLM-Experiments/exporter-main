@@ -745,12 +745,19 @@ async function addReadableInstructions(variants: EditVariant[]): Promise<EditVar
 }
 
 // Generate layer name using AI (supports both Gemini and OpenRouter)
-async function generateLayerName(
-  imageBase64: string,
-  currentName: string,
-  layerType: string
-): Promise<string> {
-  const prompt = `You are a UI layer naming assistant. Look at this UI element image and provide a concise, descriptive name.
+// Batch process multiple layers at once (up to 10)
+async function generateLayerNamesBatch(
+  layers: Array<{ imageBase64: string; currentName: string; layerType: string }>
+): Promise<string[]> {
+  const batchSize = layers.length;
+
+  // Build layer list for prompt
+  const layerList = layers
+    .map((layer, idx) => `${idx + 1}. Current name: "${layer.currentName}", Type: ${layer.layerType}`)
+    .join('\n');
+
+  const prompt = `You are a UI layer naming assistant. I'm sending you ${batchSize} UI element images.
+For each image, provide a concise, descriptive name following these rules:
 
 Rules:
 - Use 3-5 words maximum
@@ -759,30 +766,39 @@ Rules:
 - Include color only if visually distinctive
 - Include state if apparent (hover, active, disabled)
 
-Current name: "${currentName}"
-Element type: ${layerType}
+Layers to rename:
+${layerList}
 
-Respond with ONLY the new name, nothing else. No quotes, no explanation.`;
+Respond with a JSON array of exactly ${batchSize} names in the same order as the images.
+Example format: ["blue_submit_button", "main_header_text", "profile_icon"]
+
+IMPORTANT: Return ONLY the JSON array, no additional text or explanation.`;
 
   try {
     let text: string;
 
     if (AI_PROVIDER === 'openrouter') {
-      // OpenRouter path
+      // OpenRouter path - build content with all images
+      const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+        { type: 'text', text: prompt }
+      ];
+
+      // Add all images to the same request
+      layers.forEach(layer => {
+        content.push({
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${layer.imageBase64}` }
+        });
+      });
+
       const response = await callOpenRouter({
         model: OPENROUTER_MODELS.FAST,
         messages: [{
           role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            {
-              type: 'image_url',
-              image_url: { url: `data:image/png;base64,${imageBase64}` }
-            }
-          ]
+          content
         }],
         temperature: 0.3,
-        max_tokens: 100
+        max_tokens: 500
       });
 
       if (!response.ok) {
@@ -791,37 +807,81 @@ Respond with ONLY the new name, nothing else. No quotes, no explanation.`;
       }
 
       const data = await response.json() as OpenRouterResponse;
-      text = data.choices?.[0]?.message?.content?.trim() || currentName;
+      text = data.choices?.[0]?.message?.content?.trim() || '[]';
     } else {
-      // Direct Gemini path
+      // Direct Gemini path - build content with all images
       if (!genAI) {
         throw new Error('Gemini client not initialized');
       }
       const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-09-2025' });
-      const result = await model.generateContent([
-        prompt,
-        {
+
+      const content: Array<string | { inlineData: { mimeType: string; data: string } }> = [prompt];
+
+      // Add all images to the same request
+      layers.forEach(layer => {
+        content.push({
           inlineData: {
             mimeType: 'image/png',
-            data: imageBase64
+            data: layer.imageBase64
           }
-        }
-      ]);
+        });
+      });
+
+      const result = await model.generateContent(content);
       text = result.response.text().trim();
     }
 
-    // Clean up the response - same for both providers
-    const cleanedName = text
-      .replace(/^["']|["']$/g, '') // Remove surrounding quotes
-      .replace(/\s+/g, '_') // Replace spaces with underscores
-      .replace(/[^a-zA-Z0-9_]/g, '') // Remove special characters
-      .toLowerCase();
+    // Parse JSON response
+    // Remove markdown code blocks if present
+    text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '');
 
-    return cleanedName || currentName;
+    let names: string[];
+    try {
+      names = JSON.parse(text);
+    } catch (parseError) {
+      console.error('Failed to parse JSON response:', text);
+      // Fallback: try to extract array from text
+      const arrayMatch = text.match(/\[.*\]/s);
+      if (arrayMatch) {
+        names = JSON.parse(arrayMatch[0]);
+      } else {
+        throw new Error('Could not parse response as JSON array');
+      }
+    }
+
+    // Validate we got the right number of names
+    if (!Array.isArray(names) || names.length !== batchSize) {
+      console.error(`Expected ${batchSize} names, got ${names?.length || 0}`);
+      throw new Error(`Invalid response: expected ${batchSize} names`);
+    }
+
+    // Clean up all names
+    const cleanedNames = names.map((name, idx) => {
+      const cleaned = String(name)
+        .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+        .replace(/\s+/g, '_') // Replace spaces with underscores
+        .replace(/[^a-zA-Z0-9_]/g, '') // Remove special characters
+        .toLowerCase();
+
+      return cleaned || layers[idx].currentName; // Fallback to original name
+    });
+
+    return cleanedNames;
   } catch (error) {
-    console.error(`Error generating name for layer "${currentName}":`, error);
-    return currentName; // Fall back to original name on error
+    console.error(`Error generating batch names:`, error);
+    // Fall back to original names on error
+    return layers.map(layer => layer.currentName);
   }
+}
+
+// Legacy single-layer function (kept for compatibility, but now calls batch)
+async function generateLayerName(
+  imageBase64: string,
+  currentName: string,
+  layerType: string
+): Promise<string> {
+  const result = await generateLayerNamesBatch([{ imageBase64, currentName, layerType }]);
+  return result[0];
 }
 
 // Health check endpoint
@@ -904,49 +964,59 @@ app.post('/api/rename-layers', renameRateLimiter, haltOnTimedout, async (req: Re
     );
     jobId = jobResult.rows[0]?.id || null;
 
-    console.log(`[Job ${jobId}] Processing ${layers.length} layers for AI renaming (parallel with concurrency limit of 10)...`);
+    console.log(`[Job ${jobId}] Processing ${layers.length} layers for AI renaming (batch size: 10)...`);
     console.log(`[Job ${jobId}] User: ${userEmail || 'unknown'}`);
 
-    // Process layers in parallel with concurrency control
-    const settledResults = await processWithConcurrency(
-      layers,
-      async (layer: LayerInput, index: number) => {
-        console.log(`  [${index + 1}/${layers.length}] Processing: ${layer.currentName} (${layer.type})`);
-
-        const newName = await generateLayerName(
-          layer.imageBase64,
-          layer.currentName,
-          layer.type
-        );
-
-        console.log(`    -> ${newName}`);
-
-        return {
-          id: layer.id,
-          newName
-        };
-      },
-      renameLimiter
-    );
-
-    // Extract successful results and handle failures
-    const results: RenameResponse['layers'] = [];
+    // Process layers in batches of 10
+    const BATCH_SIZE = 10;
+    const results: Array<{ id: string; newName: string }> = [];
     const failures: string[] = [];
 
-    settledResults.forEach((result: PromiseSettledResult<{ id: string; newName: string }>, index: number) => {
-      if (result.status === 'fulfilled') {
-        results.push(result.value);
-      } else {
-        const layer = layers[index];
-        console.error(`  [${index + 1}/${layers.length}] Failed: ${layer.currentName} - ${result.reason}`);
-        failures.push(layer.id);
-        // Use fallback name on failure
-        results.push({
-          id: layer.id,
-          newName: layer.currentName
+    for (let i = 0; i < layers.length; i += BATCH_SIZE) {
+      const batch = layers.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(layers.length / BATCH_SIZE);
+
+      console.log(`  [Batch ${batchNumber}/${totalBatches}] Processing ${batch.length} layers (${i + 1}-${i + batch.length})...`);
+
+      try {
+        // Call batch processing function
+        const batchLayers = batch.map(layer => ({
+          imageBase64: layer.imageBase64,
+          currentName: layer.currentName,
+          layerType: layer.type
+        }));
+
+        const newNames = await generateLayerNamesBatch(batchLayers);
+
+        // Map results back to layer IDs
+        batch.forEach((layer, idx) => {
+          console.log(`    [${i + idx + 1}] ${layer.currentName} -> ${newNames[idx]}`);
+          results.push({
+            id: layer.id,
+            newName: newNames[idx]
+          });
+        });
+      } catch (error) {
+        console.error(`  [Batch ${batchNumber}/${totalBatches}] Failed:`, error);
+        // On batch failure, fall back to original names
+        batch.forEach((layer, idx) => {
+          failures.push(layer.id);
+          results.push({
+            id: layer.id,
+            newName: layer.currentName
+          });
+          console.log(`    [${i + idx + 1}] ${layer.currentName} -> ${layer.currentName} (fallback)`);
         });
       }
-    });
+
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < layers.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    // Results and failures are already collected in the loop above
 
     const duration = Date.now() - startTime;
     const status = failures.length === layers.length ? 'failed' : 'completed';
