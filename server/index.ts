@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 // CORS config for Figma plugin (null origin from iframe)
 app.use(cors({
   origin: '*',
-  methods: ['POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
 
