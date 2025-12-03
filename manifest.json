@@ -1,0 +1,20 @@
+{
+  "name": "exporter",
+  "id": "1570787275861123881",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma"
+  ],
+  "ui": "ui.html",
+  "networkAccess": {
+    "allowedDomains": [
+      "https://cdnjs.cloudflare.com",
+      "https://fonts.googleapis.com",
+      "https://fonts.gstatic.com"
+    ]
+  }
+}

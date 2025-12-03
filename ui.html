@@ -1,0 +1,524 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    /* Monochrome neutral palette */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 0 0% 9%;
+    --success-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 9%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 1.25rem;
+    margin: 0;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h2 {
+    margin: 0 0 0.375rem 0;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.3em;
+    color: hsl(var(--foreground));
+    text-transform: uppercase;
+  }
+
+  .description {
+    margin: 0 0 0.875rem 0;
+    font-size: 11px;
+    color: hsl(var(--muted-foreground));
+    line-height: 1.4;
+  }
+
+  /* Status Alert Styles */
+  .status {
+    margin: 0 0 0.875rem 0;
+    padding: 0.625rem 0.875rem;
+    border-radius: var(--radius);
+    font-size: 0.8125rem;
+    min-height: 2.25rem;
+    display: flex;
+    align-items: center;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+  }
+
+  .status.error {
+    background: hsl(var(--destructive) / 0.1);
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive) / 0.3);
+  }
+
+  .status.success {
+    background: hsl(var(--success) / 0.1);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.3);
+  }
+
+  /* Button Styles */
+  button {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 150ms ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    height: 2.5rem;
+  }
+
+  button:last-child {
+    margin-bottom: 0;
+  }
+
+  button:focus-visible {
+    outline: none;
+    ring: 2px;
+    ring-color: hsl(var(--ring));
+    ring-offset: 2px;
+  }
+
+  #export {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  }
+
+  #export:hover:not(:disabled) {
+    background: hsl(var(--primary) / 0.9);
+  }
+
+  #export:active:not(:disabled) {
+    background: hsl(var(--primary) / 0.95);
+  }
+
+  #export:disabled {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  #cancel {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    border: 1px solid hsl(var(--border));
+  }
+
+  #cancel:hover {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+  }
+
+  #cancel:active {
+    background: hsl(var(--accent) / 0.8);
+  }
+
+  /* Frame Selector Styles */
+  .frame-selector {
+    margin: 0 0 1.5rem 0;
+    padding: 1.5rem;
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .frame-icon {
+    color: hsl(var(--muted-foreground));
+    position: relative;
+  }
+
+  .frame-icon svg {
+    display: block;
+  }
+
+  .frame-icon .checkmark {
+    transition: opacity 200ms ease;
+  }
+
+  .frame-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(var(--foreground));
+    text-align: center;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Button Icon Styles */
+  .btn-icon {
+    display: inline-block;
+    margin-right: 0.5rem;
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .spinner {
+    animation: spin 1s linear infinite;
+    width: 1rem;
+    height: 1rem;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .hidden {
+    display: none;
+  }
+</style>
+
+<h2>Exporter</h2>
+<p class="description">Export your designs for taggr submissions</p>
+
+<div class="frame-selector">
+  <div class="frame-icon">
+    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="16" y="16" width="32" height="32" rx="4" stroke="currentColor" stroke-width="2" fill="none"/>
+      <line x1="32" y1="16" x2="32" y2="48" stroke="currentColor" stroke-width="2"/>
+      <line x1="16" y1="32" x2="48" y2="32" stroke="currentColor" stroke-width="2"/>
+      <circle class="checkmark hidden" cx="48" cy="16" r="10" fill="hsl(var(--success))"/>
+      <path class="checkmark hidden" d="M 44 16 L 47 19 L 52 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </div>
+  <div class="frame-name" id="frame-name">Select Frame to Export</div>
+</div>
+
+<button id="export">
+  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
+  </svg>
+  <svg class="btn-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span class="btn-text">Export</span>
+</button>
+<button id="cancel">Cancel</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+
+const exportBtn = document.getElementById('export');
+const btnText = exportBtn.querySelector('.btn-text');
+const spinnerIcon = exportBtn.querySelector('.spinner');
+const checkIcon = exportBtn.querySelectorAll('.btn-icon')[1];
+const frameNameEl = document.getElementById('frame-name');
+const checkmarks = document.querySelectorAll('.checkmark');
+
+// Button state management
+function setButtonState(state) {
+  switch(state) {
+    case 'loading':
+      exportBtn.disabled = true;
+      btnText.textContent = 'Exporting';
+      spinnerIcon.classList.remove('hidden');
+      checkIcon.classList.add('hidden');
+      break;
+    case 'success':
+      exportBtn.disabled = false;
+      btnText.textContent = 'Export';
+      spinnerIcon.classList.add('hidden');
+      checkIcon.classList.remove('hidden');
+      // Reset to default after 2 seconds
+      setTimeout(() => setButtonState('default'), 2000);
+      break;
+    case 'default':
+    default:
+      exportBtn.disabled = false;
+      btnText.textContent = 'Export';
+      spinnerIcon.classList.add('hidden');
+      checkIcon.classList.add('hidden');
+      break;
+  }
+}
+
+document.getElementById('export').onclick = () => {
+  console.log('Export button clicked');
+  try {
+    setButtonState('loading');
+
+    // Hardcoded: PNG format at 4x resolution
+    const format = 'png';
+    const scale = 4;
+
+    console.log('Exporting with format:', format, 'scale:', scale);
+    parent.postMessage({ pluginMessage: { type: 'export-frame', format, scale } }, '*');
+  } catch (e) {
+    console.error('Error during export:', e);
+    setButtonState('default');
+  }
+}
+
+document.getElementById('cancel').onclick = () => {
+  parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+}
+
+window.onmessage = async (event) => {
+  const msg = event.data.pluginMessage;
+
+  if (msg.type === 'selection-change') {
+    // Update frame selection feedback
+    if (msg.hasFrame) {
+      frameNameEl.textContent = msg.frameName;
+      checkmarks.forEach(checkmark => checkmark.classList.remove('hidden'));
+    } else {
+      frameNameEl.textContent = 'Select Frame to Export';
+      checkmarks.forEach(checkmark => checkmark.classList.add('hidden'));
+    }
+    return;
+  }
+
+  if (msg.type === 'export-data') {
+    try {
+      // Validate required data
+      if (!msg.meta || !msg.layers || !msg.folderName) {
+        throw new Error('Missing required export data. Please try again.');
+      }
+
+      if (!msg.meta.component || !msg.meta.layers) {
+        throw new Error('Invalid metadata structure. Please try again.');
+      }
+
+      const frameInfo = msg.totalFrames > 1
+        ? ` (${msg.frameIndex + 1}/${msg.totalFrames})`
+        : '';
+
+      let reconstructedBlob;
+      const exportFormat = msg.format || 'png';
+
+      if (exportFormat === 'svg') {
+        // SVG reconstruction
+        // Sort layers by z-index
+        const sortedLayers = msg.meta.layers
+          .filter(layer => layer.visible)
+          .sort((a, b) => a.z - b.z);
+
+        // Build SVG content
+        let svgContent = `<svg width="${msg.meta.component.width}" height="${msg.meta.component.height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n`;
+
+        for (const layer of sortedLayers) {
+          const layerData = msg.layers.find(l => l.filename === layer.id.replace(/:/g, '_') + '.svg');
+          if (!layerData) continue;
+
+          // Decode base64 SVG
+          const svgText = atob(layerData.data);
+
+          // Use export bounds if available
+          const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
+          const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
+
+          // Wrap in a group with transform for positioning
+          svgContent += `  <g transform="translate(${useX}, ${useY})">\n`;
+          svgContent += `    ${svgText}\n`;
+          svgContent += `  </g>\n`;
+        }
+
+        svgContent += '</svg>';
+
+        // Convert SVG to blob
+        reconstructedBlob = new Blob([svgContent], { type: 'image/svg+xml' });
+
+      } else {
+        // PNG reconstruction
+        // Get scale factor from metadata (default to 2 for backwards compatibility)
+        const scale = msg.meta.scale || 2;
+
+        // Create canvas at the SCALED resolution to match exported layers
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(msg.meta.component.width * scale);
+        canvas.height = Math.round(msg.meta.component.height * scale);
+        const ctx = canvas.getContext('2d');
+
+        // Sort layers by z-index
+        const sortedLayers = msg.meta.layers
+          .filter(layer => layer.visible)
+          .sort((a, b) => a.z - b.z);
+
+        // Load and draw all layer images
+        const loadPromises = [];
+        for (let i = 0; i < sortedLayers.length; i++) {
+          const layer = sortedLayers[i];
+          const layerData = msg.layers.find(l => l.filename === layer.id.replace(/:/g, '_') + '.png');
+
+          if (!layerData) continue;
+
+          const promise = new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              // Use export bounds if available (for accurate positioning of effects, strokes, etc.)
+              // Otherwise fall back to node bounds
+              const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
+              const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
+
+              // Both canvas and images are at the same scale
+              const layerX = Math.round(useX * scale);
+              const layerY = Math.round(useY * scale);
+
+              // Actual image dimensions at the exported scale
+              const imgWidth = img.naturalWidth || img.width;
+              const imgHeight = img.naturalHeight || img.height;
+
+              // Calculate clipping in scaled space
+              const sx = Math.max(0, -layerX);
+              const sy = Math.max(0, -layerY);
+              const sw = Math.min(imgWidth - sx, canvas.width - Math.max(0, layerX));
+              const sh = Math.min(imgHeight - sy, canvas.height - Math.max(0, layerY));
+
+              // Draw position in scaled space
+              const dx = Math.max(0, layerX);
+              const dy = Math.max(0, layerY);
+
+              if (sw > 0 && sh > 0) {
+                ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+              }
+              resolve();
+            };
+            img.onerror = reject;
+            img.src = 'data:image/png;base64,' + layerData.data;
+          });
+
+          loadPromises.push(promise);
+        }
+
+        // Wait for all images to be drawn
+        await Promise.all(loadPromises);
+
+        // Convert canvas to blob
+        reconstructedBlob = await new Promise((resolve, reject) => {
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create image blob'));
+            }
+          }, 'image/png');
+        });
+      }
+
+      // Removed status updates
+
+      const zip = new JSZip();
+      const folderName = msg.folderName;
+
+      // Add meta.json with validation
+      const metaWithFormat = { ...msg.meta, format: exportFormat };
+
+      // Validate JSON serialization
+      let metaJson;
+      try {
+        metaJson = JSON.stringify(metaWithFormat, null, 2);
+        if (!metaJson || metaJson === '{}') {
+          throw new Error('Failed to serialize metadata');
+        }
+      } catch (e) {
+        throw new Error('Failed to create metadata file: ' + e.message);
+      }
+
+      zip.file(`${folderName}/meta.json`, metaJson);
+
+      // Add all layer files (PNG or SVG)
+      const layersFolder = zip.folder(`${folderName}/layers`);
+      for (const layer of msg.layers) {
+        layersFolder.file(layer.filename, layer.data, { base64: true });
+      }
+
+      // Add reconstructed image with correct extension
+      const reconstructedExt = exportFormat === 'svg' ? '.svg' : '.png';
+
+      // Validate reconstructed blob before adding
+      if (!reconstructedBlob) {
+        throw new Error('Failed to create reconstructed image');
+      }
+
+      zip.file(`${folderName}/${msg.meta.component.name}_reconstructed${reconstructedExt}`, reconstructedBlob);
+
+      // Generate ZIP with explicit options for cross-platform compatibility
+      const blob = await zip.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: {
+          level: 6
+        },
+        platform: 'UNIX' // Ensures consistent path separators
+      });
+
+      // Validate ZIP blob
+      if (!blob || blob.size === 0) {
+        throw new Error('Failed to generate ZIP file');
+      }
+
+      // Trigger download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${folderName}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+    } catch (error) {
+      console.error('Error creating ZIP:', error);
+      // Show user-facing error message in console
+      alert('Export failed: ' + error.message);
+      setButtonState('default');
+    }
+  }
+
+  if (msg.type === 'all-exports-complete') {
+    // Show success state in button
+    setButtonState('success');
+  }
+
+  if (msg.type === 'error') {
+    // Show error in alert
+    alert(msg.message);
+    setButtonState('default');
+  }
+}
+
+</script>
