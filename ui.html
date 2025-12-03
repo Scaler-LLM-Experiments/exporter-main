@@ -914,7 +914,7 @@
       showProgress('Exporting frame...');
 
       const format = 'png';
-      const scale = 4;
+      const scale = 2; // Reduced from 4x to 2x for faster exports (still high quality)
 
       parent.postMessage({ pluginMessage: { type: 'export-frame', format, scale } }, '*');
     } catch (e) {
@@ -1003,11 +1003,22 @@
             const layerCount = frame.layers.filter(l => l.imageData).length;
             console.log(`  🎯 [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${layerCount} layers`);
 
+            // Update UI with individual frame progress
+            showProgress(`⏳ Renaming [${frameIndex + 1}/${totalFrames}]: ${frame.frameName} (${layerCount} layers)...`);
+
             return callRenamingAPI(frame.layers).then(result => {
               console.log(`  ✅ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${result.layers.length} layers renamed`);
+
+              // Update UI showing completion
+              showProgress(`✅ Renamed [${frameIndex + 1}/${totalFrames}]: ${frame.frameName}`);
+
               return result.layers; // Return just the renames array
             }).catch(error => {
               console.error(`  ❌ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - Error: ${error.message}`);
+
+              // Update UI showing error
+              showProgress(`❌ Failed [${frameIndex + 1}/${totalFrames}]: ${frame.frameName}`);
+
               throw error;
             });
           });
@@ -1173,7 +1184,11 @@
           // Process all frames in this batch in parallel
           const batchPromises = batch.map((frame, batchIndex) => {
             const frameIndex = batchStart + batchIndex;
+            const layerCount = frame.layers.filter(l => l.imageData).length;
             console.log(`  🎯 [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${frame.layers.length} layers`);
+
+            // Update UI with individual frame progress
+            showProgress(`⏳ Processing [${frameIndex + 1}/${totalFrames}]: ${frame.frameName} (${layerCount} layers)...`);
 
             return callGenerateEditsAPI(
               frame.frameName,
@@ -1184,6 +1199,10 @@
               generateImages
             ).then(result => {
               console.log(`  ✅ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${result.variants.length} variants generated`);
+
+              // Update UI showing completion
+              showProgress(`✅ Completed [${frameIndex + 1}/${totalFrames}]: ${frame.frameName}`);
+
               return {
                 frameId: frame.frameId,
                 frameName: frame.frameName,
@@ -1191,6 +1210,10 @@
               };
             }).catch(error => {
               console.error(`  ❌ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - Error: ${error.message}`);
+
+              // Update UI showing error
+              showProgress(`❌ Failed [${frameIndex + 1}/${totalFrames}]: ${frame.frameName}`);
+
               throw error;
             });
           });

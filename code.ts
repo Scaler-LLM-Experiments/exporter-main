@@ -703,44 +703,53 @@ async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promis
     }
   }
 
-  const layerExports: Array<{
-    id: string;
-    name: string;
-    type: string;
-    imageData: string;
-  }> = [];
+  // Show initial progress
+  figma.ui.postMessage({
+    type: 'progress',
+    message: `Exporting ${allLayers.length} layers in parallel...`
+  });
 
-  // Export each layer as PNG at 1x scale for AI analysis
-  for (let i = 0; i < allLayers.length; i++) {
-    const layer = allLayers[i];
-
-    figma.ui.postMessage({
-      type: 'progress',
-      message: `Exporting layer ${i + 1}/${allLayers.length}: ${layer.name}`
-    });
-
+  // Export all layers in parallel for much faster processing
+  const exportPromises = allLayers.map(async (layer, index) => {
     try {
       const bytes = await layer.exportAsync({
         format: 'PNG',
         constraint: { type: 'SCALE', value: 1 }
       });
-      layerExports.push({
+
+      // Update progress periodically (every 10 layers)
+      if (index % 10 === 0) {
+        figma.ui.postMessage({
+          type: 'progress',
+          message: `Exported ${index + 1}/${allLayers.length} layers...`
+        });
+      }
+
+      return {
         id: layer.id,
         name: layer.name,
         type: layer.type,
         imageData: figma.base64Encode(bytes)
-      });
+      };
     } catch (error) {
       console.error(`Failed to export layer ${layer.name}:`, error);
       // Still include the layer but without image data
-      layerExports.push({
+      return {
         id: layer.id,
         name: layer.name,
         type: layer.type,
         imageData: ''
-      });
+      };
     }
-  }
+  });
+
+  // Wait for all exports to complete in parallel
+  const layerExports = await Promise.all(exportPromises);
+
+  figma.ui.postMessage({
+    type: 'progress',
+    message: `✅ Exported ${layerExports.length} layers`
+  });
 
   return {
     frameId: frame.id,
@@ -2459,19 +2468,29 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      // Process all selected frames for renaming
-      const allFrameData = [];
-      for (let i = 0; i < frames.length; i++) {
-        const frame = frames[i];
+      // Process all selected frames for renaming in parallel
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `Extracting layers from ${frames.length} frame(s) in parallel...`
+      });
 
-        figma.ui.postMessage({
-          type: 'progress',
-          message: `Extracting layers from frame ${i + 1}/${frames.length}: ${frame.name}...`
-        });
+      const framePromises = frames.map(async (frame, i) => {
+        // Update progress periodically
+        if (i % 5 === 0) {
+          figma.ui.postMessage({
+            type: 'progress',
+            message: `Processing frame ${i + 1}/${frames.length}: ${frame.name}...`
+          });
+        }
+        return exportLayersForRenaming(frame);
+      });
 
-        const frameData = await exportLayersForRenaming(frame);
-        allFrameData.push(frameData);
-      }
+      const allFrameData = await Promise.all(framePromises);
+
+      figma.ui.postMessage({
+        type: 'progress',
+        message: `✅ Extracted layers from ${frames.length} frame(s)`
+      });
 
       // Send all frames to UI for parallel processing
       figma.ui.postMessage({
@@ -2578,40 +2597,37 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       console.log(`[Plugin] Processing ${framesToProcess.length} frame(s) for edit generation`);
 
-      // Extract metadata for each frame
-      const allFrameData = [];
-      for (let i = 0; i < framesToProcess.length; i++) {
-        const frame = framesToProcess[i];
-
-        figma.ui.postMessage({
-          type: 'progress',
-          message: `Extracting metadata from frame ${i + 1}/${framesToProcess.length}: ${frame.name}...`
-        });
+      // Extract metadata for each frame in parallel for faster processing
+      const framePromises = framesToProcess.map(async (frame, i) => {
+        // Send progress update every 5 frames
+        if (i % 5 === 0) {
+          figma.ui.postMessage({
+            type: 'progress',
+            message: `Processing frame ${i + 1}/${framesToProcess.length}: ${frame.name}...`
+          });
+        }
 
         const metadata = await extractLayerMetadataForEdits(frame);
         console.log(`[Plugin] Extracted metadata for ${metadata.length} layers from ${frame.name}`);
 
         // Export frame as 1x PNG for AI vision analysis
-        figma.ui.postMessage({
-          type: 'progress',
-          message: `Capturing frame ${i + 1}/${framesToProcess.length} image...`
-        });
-
         const frameImageBytes = await frame.exportAsync({
           format: 'PNG',
           constraint: { type: 'SCALE', value: 1 }
         });
         const frameImageBase64 = figma.base64Encode(frameImageBytes);
 
-        allFrameData.push({
+        return {
           frameId: frame.id,
           frameName: frame.name,
           frameWidth: frame.width,
           frameHeight: frame.height,
           layers: metadata,
           frameImageBase64: frameImageBase64
-        });
-      }
+        };
+      });
+
+      const allFrameData = await Promise.all(framePromises);
 
       // Send all frame data to UI for AI processing
       figma.ui.postMessage({

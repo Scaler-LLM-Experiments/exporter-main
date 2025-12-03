@@ -9,6 +9,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { renameLimiter, imageLimiter, processWithConcurrency } from './lib/concurrency';
 import { apiLimiter, heavyLimiter, renameRateLimiter } from './lib/rateLimiter';
 import { query as dbQuery } from './lib/db';
+import { aiCache } from './lib/cache';
 
 dotenv.config();
 
@@ -898,6 +899,17 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'exporter-server' });
 });
 
+// Cache stats endpoint
+app.get('/api/cache/stats', (_req: Request, res: Response) => {
+  res.json(aiCache.getStats());
+});
+
+// Clear cache endpoint (for debugging)
+app.post('/api/cache/clear', (_req: Request, res: Response) => {
+  aiCache.clear();
+  res.json({ message: 'Cache cleared successfully' });
+});
+
 // Get available prompts endpoint
 app.get('/api/prompts', (_req: Request, res: Response) => {
   try {
@@ -1098,6 +1110,17 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
     // Count image layers
     const imageLayers = layers.filter(l => l.hasImageFill);
 
+    // Generate cache key based on frame structure (not images, for faster hashing)
+    const cacheKey = aiCache.generateKey({
+      frameName,
+      frameWidth,
+      frameHeight,
+      layerCount: layers.length,
+      layerNames: layers.map(l => l.name).sort(), // Sorted for consistency
+      promptFile: promptFile || 'default.txt',
+      generateImages: generateImages || false
+    });
+
     console.log(`\n========================================`);
     console.log(`[Job ${jobId}] Generating edits for frame "${frameName}"`);
     console.log(`Frame size: ${frameWidth} x ${frameHeight}`);
@@ -1106,7 +1129,31 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
     console.log(`Generate AI Images: ${generateImages ? 'YES' : 'No'}`);
     console.log(`Prompt file: ${promptFile || 'default.txt'}`);
     console.log(`User: ${userEmail || 'unknown'}`);
+    console.log(`Cache key: ${cacheKey.substring(0, 16)}...`);
     console.log(`========================================\n`);
+
+    // Check cache first
+    const cachedVariants = aiCache.get<EditVariant[]>(cacheKey);
+    if (cachedVariants) {
+      console.log(`[Job ${jobId}] ✨ CACHE HIT! Returning cached variants instantly`);
+
+      const duration = Date.now() - startTime;
+
+      // Update job as completed
+      if (jobId) {
+        await dbQuery(
+          `UPDATE jobs
+           SET status = $1, completed_at = NOW(), duration_ms = $2
+           WHERE id = $3`,
+          ['completed', duration, jobId]
+        );
+      }
+
+      res.json({ variants: cachedVariants });
+      return;
+    }
+
+    console.log(`[Job ${jobId}] Cache miss - generating new variants...`);
 
     // Load the user-selected prompt file
     let activePrompt = EDIT_GENERATION_PROMPT;
@@ -1324,6 +1371,9 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
       console.log(`  ${i + 1}. ${v.theme}: ${v.instructions.length} instructions`);
       console.log(`     "${v.humanPrompt}"`);
     });
+
+    // Store in cache for future use (24 hour TTL)
+    aiCache.set(cacheKey, variants, 24 * 60 * 60 * 1000);
 
     // Update job as completed
     if (jobId) {
