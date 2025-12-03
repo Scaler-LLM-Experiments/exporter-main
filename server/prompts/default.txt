@@ -73,9 +73,9 @@ Then a "Cool Teal" variant MUST change ALL THREE:
 **Variant 5 - Minimalist Reduction**: Hide secondary elements, scale up hero, create breathing room.
 
 ## Google Fonts Reference
-Serif: "Playfair Display", "Merriweather", "Lora", "Source Serif Pro", "Cormorant Garamond"
-Sans-Serif: "Montserrat", "Raleway", "Poppins", "Open Sans", "Roboto", "Work Sans"
-Display: "Oswald", "Bebas Neue", "Anton", "Abril Fatface"
+Serif: "Playfair Display", "Merriweather", "Lora", "Source Serif Pro", "Cormorant Garamond", "Georgia", "Times New Roman", "PT Serif", "Noto Serif", "Libre Baskerville"
+Sans-Serif: "Montserrat", "Raleway", "Poppins", "Open Sans", "Roboto", "Work Sans", "Arial", "Helvetica", "Lato", "Inter", "Nunito", "Ubuntu"
+Display: "Oswald", "Bebas Neue", "Anton", "Abril Fatface", "Pacifico", "Lobster", "Permanent Marker", "Righteous", "Fredoka One"
 
 ## Special Targets
 - **frame_background**: The canvas itself. Changing its fill changes the entire background.

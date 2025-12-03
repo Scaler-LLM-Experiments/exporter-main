@@ -96,20 +96,42 @@ interface LayerMetadataForAI {
 interface EditInstruction {
   action: string;
   target: string;
+  // Position/Layout
   x?: number;
   y?: number;
   relative?: boolean;
-  color?: string;
-  opacity?: number;
-  weight?: number;
-  content?: string;
   width?: number;
   height?: number;
   scale?: number;
   position?: 'front' | 'back' | number;
-  fontFamily?: string;   // For changeFont action - Google Font family name
-  fontStyle?: string;    // For changeFont action - Regular, Bold, Italic, etc.
-  fontSize?: number;     // For changeFontSize action - size in pixels
+  // Color/Fill
+  color?: string;
+  opacity?: number;
+  weight?: number;
+  // Text
+  content?: string;
+  fontFamily?: string;
+  fontStyle?: string;
+  fontSize?: number;
+  align?: 'left' | 'center' | 'right' | 'justify';  // For changeTextAlign
+  lineHeight?: number;      // For changeLineHeight (multiplier like 1.5)
+  letterSpacing?: number;   // For changeLetterSpacing (in pixels)
+  // Shape
+  radius?: number;          // For changeCornerRadius
+  angle?: number;           // For rotate (in degrees)
+  // Shadow
+  blur?: number;            // For addShadow/addBlur
+  shadowX?: number;         // For addShadow offset
+  shadowY?: number;         // For addShadow offset
+  spread?: number;          // For addShadow spread
+  // Alignment
+  horizontal?: 'left' | 'center' | 'right';   // For alignTo
+  vertical?: 'top' | 'center' | 'bottom';     // For alignTo
+  // Effects
+  blendMode?: string;       // For changeBlendMode
+  // Gradient
+  colors?: string[];        // For addGradient
+  gradientAngle?: number;   // For addGradient
 }
 
 interface EditVariant {
@@ -940,6 +962,37 @@ async function executeEditInstruction(
         return await executeChangeFontSize(layer, instruction);
       case 'hide':
         return executeHide(layer, instruction);
+      // New actions
+      case 'changeCornerRadius':
+        return executeChangeCornerRadius(layer, instruction);
+      case 'changeTextAlign':
+        return await executeChangeTextAlign(layer, instruction);
+      case 'rotate':
+        return executeRotate(layer, instruction);
+      case 'addShadow':
+        return executeAddShadow(layer, instruction);
+      case 'removeShadow':
+        return executeRemoveShadow(layer, instruction);
+      case 'addBlur':
+        return executeAddBlur(layer, instruction);
+      case 'duplicate':
+        return executeDuplicate(layer, instruction, frame);
+      case 'delete':
+        return executeDelete(layer, instruction);
+      case 'alignTo':
+        return executeAlignTo(layer, instruction, frame);
+      case 'changeLineHeight':
+        return await executeChangeLineHeight(layer, instruction);
+      case 'changeLetterSpacing':
+        return await executeChangeLetterSpacing(layer, instruction);
+      case 'flipHorizontal':
+        return executeFlipHorizontal(layer, instruction);
+      case 'flipVertical':
+        return executeFlipVertical(layer, instruction);
+      case 'changeBlendMode':
+        return executeChangeBlendMode(layer, instruction);
+      case 'addGradient':
+        return executeAddGradient(layer, instruction);
       default:
         return { success: false, error: `Unknown action: ${instruction.action}` };
     }
@@ -1212,6 +1265,368 @@ function executeHide(
     return { success: true };
   }
   return { success: false, error: 'Layer does not support visibility' };
+}
+
+// Change corner radius
+function executeChangeCornerRadius(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('cornerRadius' in layer)) {
+    return { success: false, error: 'Layer does not support corner radius' };
+  }
+  if (instruction.radius === undefined) {
+    return { success: false, error: 'changeCornerRadius requires radius' };
+  }
+
+  const node = layer as RectangleNode | FrameNode;
+  node.cornerRadius = instruction.radius;
+  console.log(`  Changed corner radius to ${instruction.radius}`);
+  return { success: true };
+}
+
+// Change text alignment
+async function executeChangeTextAlign(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+  if (!instruction.align) {
+    return { success: false, error: 'changeTextAlign requires align' };
+  }
+
+  const textNode = layer as TextNode;
+
+  // Load font before modifying
+  const fontName = textNode.fontName;
+  if (fontName !== figma.mixed) {
+    await figma.loadFontAsync(fontName);
+  }
+
+  const alignMap: Record<string, 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFIED'> = {
+    'left': 'LEFT',
+    'center': 'CENTER',
+    'right': 'RIGHT',
+    'justify': 'JUSTIFIED'
+  };
+
+  textNode.textAlignHorizontal = alignMap[instruction.align] || 'LEFT';
+  console.log(`  Changed text align to ${instruction.align}`);
+  return { success: true };
+}
+
+// Rotate layer
+function executeRotate(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('rotation' in layer)) {
+    return { success: false, error: 'Layer does not support rotation' };
+  }
+  if (instruction.angle === undefined) {
+    return { success: false, error: 'rotate requires angle' };
+  }
+
+  layer.rotation = instruction.angle;
+  console.log(`  Rotated to ${instruction.angle} degrees`);
+  return { success: true };
+}
+
+// Add drop shadow
+function executeAddShadow(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('effects' in layer)) {
+    return { success: false, error: 'Layer does not support effects' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  const color = instruction.color ? hexToRgb(instruction.color) : null;
+  const rgb = color ?? { r: 0, g: 0, b: 0 };
+
+  const shadow: DropShadowEffect = {
+    type: 'DROP_SHADOW',
+    color: { r: rgb.r, g: rgb.g, b: rgb.b, a: instruction.opacity ?? 0.25 },
+    offset: { x: instruction.shadowX ?? 0, y: instruction.shadowY ?? 4 },
+    radius: instruction.blur ?? 8,
+    spread: instruction.spread ?? 0,
+    visible: true,
+    blendMode: 'NORMAL'
+  };
+
+  // Add to existing effects
+  node.effects = [...node.effects, shadow];
+  console.log(`  Added drop shadow`);
+  return { success: true };
+}
+
+// Remove all shadows
+function executeRemoveShadow(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('effects' in layer)) {
+    return { success: false, error: 'Layer does not support effects' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  node.effects = node.effects.filter(e => e.type !== 'DROP_SHADOW');
+  console.log(`  Removed shadows`);
+  return { success: true };
+}
+
+// Add blur effect
+function executeAddBlur(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('effects' in layer)) {
+    return { success: false, error: 'Layer does not support effects' };
+  }
+  if (instruction.blur === undefined) {
+    return { success: false, error: 'addBlur requires blur amount' };
+  }
+
+  const node = layer as RectangleNode | FrameNode;
+
+  // Use Effect type with LAYER_BLUR - Figma API handles the blur internally
+  const blurEffect: Effect = {
+    type: 'LAYER_BLUR',
+    radius: instruction.blur,
+    visible: true
+  } as Effect;
+
+  node.effects = [...node.effects, blurEffect];
+  console.log(`  Added blur effect (${instruction.blur}px)`);
+  return { success: true };
+}
+
+// Duplicate layer
+function executeDuplicate(
+  layer: SceneNode,
+  instruction: EditInstruction,
+  frame: FrameNode | ComponentNode
+): { success: boolean; error?: string } {
+  const clone = layer.clone();
+
+  // Position the clone
+  if ('x' in clone && 'y' in clone) {
+    clone.x = (layer as SceneNode & { x: number }).x + (instruction.x ?? 20);
+    clone.y = (layer as SceneNode & { y: number }).y + (instruction.y ?? 20);
+  }
+
+  // Add to frame
+  frame.appendChild(clone);
+  console.log(`  Duplicated layer`);
+  return { success: true };
+}
+
+// Delete layer
+function executeDelete(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (layer.parent) {
+    layer.remove();
+    console.log(`  Deleted layer`);
+    return { success: true };
+  }
+  return { success: false, error: 'Cannot delete layer without parent' };
+}
+
+// Align layer to frame
+function executeAlignTo(
+  layer: SceneNode,
+  instruction: EditInstruction,
+  frame: FrameNode | ComponentNode
+): { success: boolean; error?: string } {
+  if (!('x' in layer) || !('y' in layer) || !('width' in layer) || !('height' in layer)) {
+    return { success: false, error: 'Layer does not support positioning' };
+  }
+
+  const layerNode = layer as SceneNode & { x: number; y: number; width: number; height: number };
+
+  // Horizontal alignment
+  if (instruction.horizontal === 'left') {
+    layerNode.x = 0;
+  } else if (instruction.horizontal === 'center') {
+    layerNode.x = (frame.width - layerNode.width) / 2;
+  } else if (instruction.horizontal === 'right') {
+    layerNode.x = frame.width - layerNode.width;
+  }
+
+  // Vertical alignment
+  if (instruction.vertical === 'top') {
+    layerNode.y = 0;
+  } else if (instruction.vertical === 'center') {
+    layerNode.y = (frame.height - layerNode.height) / 2;
+  } else if (instruction.vertical === 'bottom') {
+    layerNode.y = frame.height - layerNode.height;
+  }
+
+  console.log(`  Aligned to ${instruction.horizontal || ''} ${instruction.vertical || ''}`);
+  return { success: true };
+}
+
+// Change line height
+async function executeChangeLineHeight(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+  if (instruction.lineHeight === undefined) {
+    return { success: false, error: 'changeLineHeight requires lineHeight' };
+  }
+
+  const textNode = layer as TextNode;
+
+  // Load font before modifying
+  const fontName = textNode.fontName;
+  if (fontName !== figma.mixed) {
+    await figma.loadFontAsync(fontName);
+  }
+
+  // Line height as percentage (1.5 = 150%)
+  textNode.lineHeight = { value: instruction.lineHeight * 100, unit: 'PERCENT' };
+  console.log(`  Changed line height to ${instruction.lineHeight}`);
+  return { success: true };
+}
+
+// Change letter spacing
+async function executeChangeLetterSpacing(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+  if (instruction.letterSpacing === undefined) {
+    return { success: false, error: 'changeLetterSpacing requires letterSpacing' };
+  }
+
+  const textNode = layer as TextNode;
+
+  // Load font before modifying
+  const fontName = textNode.fontName;
+  if (fontName !== figma.mixed) {
+    await figma.loadFontAsync(fontName);
+  }
+
+  textNode.letterSpacing = { value: instruction.letterSpacing, unit: 'PIXELS' };
+  console.log(`  Changed letter spacing to ${instruction.letterSpacing}px`);
+  return { success: true };
+}
+
+// Flip horizontally
+function executeFlipHorizontal(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('rotation' in layer)) {
+    return { success: false, error: 'Layer does not support transformation' };
+  }
+
+  // Figma doesn't have direct flip, but we can use rescale
+  const node = layer as SceneNode & { rescale: (x: number, y: number) => void };
+  if ('rescale' in layer) {
+    node.rescale(-1, 1);
+    console.log(`  Flipped horizontally`);
+    return { success: true };
+  }
+  return { success: false, error: 'Layer does not support flip' };
+}
+
+// Flip vertically
+function executeFlipVertical(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('rotation' in layer)) {
+    return { success: false, error: 'Layer does not support transformation' };
+  }
+
+  const node = layer as SceneNode & { rescale: (x: number, y: number) => void };
+  if ('rescale' in layer) {
+    node.rescale(1, -1);
+    console.log(`  Flipped vertically`);
+    return { success: true };
+  }
+  return { success: false, error: 'Layer does not support flip' };
+}
+
+// Change blend mode
+function executeChangeBlendMode(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('blendMode' in layer)) {
+    return { success: false, error: 'Layer does not support blend mode' };
+  }
+  if (!instruction.blendMode) {
+    return { success: false, error: 'changeBlendMode requires blendMode' };
+  }
+
+  const validModes: BlendMode[] = [
+    'PASS_THROUGH', 'NORMAL', 'DARKEN', 'MULTIPLY', 'LINEAR_BURN', 'COLOR_BURN',
+    'LIGHTEN', 'SCREEN', 'LINEAR_DODGE', 'COLOR_DODGE', 'OVERLAY', 'SOFT_LIGHT',
+    'HARD_LIGHT', 'DIFFERENCE', 'EXCLUSION', 'HUE', 'SATURATION', 'COLOR', 'LUMINOSITY'
+  ];
+
+  const mode = instruction.blendMode.toUpperCase().replace(' ', '_') as BlendMode;
+  if (validModes.indexOf(mode) === -1) {
+    return { success: false, error: `Invalid blend mode: ${instruction.blendMode}` };
+  }
+
+  (layer as SceneNode & { blendMode: BlendMode }).blendMode = mode;
+  console.log(`  Changed blend mode to ${mode}`);
+  return { success: true };
+}
+
+// Add gradient fill
+function executeAddGradient(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('fills' in layer)) {
+    return { success: false, error: 'Layer does not support fills' };
+  }
+  if (!instruction.colors || instruction.colors.length < 2) {
+    return { success: false, error: 'addGradient requires at least 2 colors' };
+  }
+
+  const node = layer as RectangleNode | FrameNode;
+  const angle = (instruction.gradientAngle ?? 0) * (Math.PI / 180);
+
+  // Create gradient stops
+  const stops: ColorStop[] = instruction.colors.map((color, index) => {
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+    return {
+      position: index / (instruction.colors!.length - 1),
+      color: { r: rgb.r, g: rgb.g, b: rgb.b, a: 1 }
+    };
+  });
+
+  // Calculate transform based on angle
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  const gradientFill: GradientPaint = {
+    type: 'GRADIENT_LINEAR',
+    gradientStops: stops,
+    gradientTransform: [
+      [cos, sin, 0.5 - cos * 0.5 - sin * 0.5],
+      [-sin, cos, 0.5 + sin * 0.5 - cos * 0.5]
+    ]
+  };
+
+  node.fills = [gradientFill];
+  console.log(`  Added gradient with ${instruction.colors.length} colors`);
+  return { success: true };
 }
 
 // ============================================
