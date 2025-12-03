@@ -74,9 +74,19 @@ interface ExportData {
   scale: number;
 }
 
-// Helper function to create a safe filename from layer ID
-function createFilename(id: string): string {
-  return id.replace(/:/g, '_') + '.png';
+// Helper function to create a safe filename from layer name
+function createFilename(name: string, id: string): string {
+  // Sanitize the layer name: remove/replace invalid filename characters
+  const safeName = name
+    .replace(/[<>:"/\\|?*]/g, '_')  // Replace invalid filename chars
+    .replace(/\s+/g, '_')            // Replace spaces with underscores
+    .replace(/_+/g, '_')             // Collapse multiple underscores
+    .replace(/^_|_$/g, '')           // Trim leading/trailing underscores
+    .substring(0, 100);              // Limit length
+
+  // Use sanitized name, fallback to ID if name is empty
+  const baseName = safeName || id.replace(/:/g, '_');
+  return `${baseName}.png`;
 }
 
 // Helper function to create a safe folder name
@@ -411,13 +421,14 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
   }
 
   // Export the temporary rectangle (frame background only)
+  const frameBaseName = frame.name + '_base';
   if (format === 'svg') {
     exportPromises.push(
       tempRect.exportAsync({ format: 'SVG' })
         .then(bytes => {
           tempRect.remove(); // Clean up temp node
           return {
-            filename: createFilename(frame.id).replace('.png', '.svg'),
+            filename: createFilename(frameBaseName, frame.id).replace('.png', '.svg'),
             data: figma.base64Encode(bytes)
           };
         })
@@ -432,7 +443,7 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
         .then(bytes => {
           tempRect.remove(); // Clean up temp node
           return {
-            filename: createFilename(frame.id),
+            filename: createFilename(frameBaseName, frame.id),
             data: figma.base64Encode(bytes)
           };
         })
@@ -536,7 +547,7 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
       exportPromises.push(
         layer.exportAsync({ format: 'SVG' })
           .then(bytes => ({
-            filename: createFilename(layer.id).replace('.png', '.svg'),
+            filename: createFilename(layer.name, layer.id).replace('.png', '.svg'),
             data: figma.base64Encode(bytes)
           }))
       );
@@ -545,7 +556,7 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
       exportPromises.push(
         layer.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: scale } })
           .then(bytes => ({
-            filename: createFilename(layer.id),
+            filename: createFilename(layer.name, layer.id),
             data: figma.base64Encode(bytes)
           }))
       );
