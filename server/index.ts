@@ -2,6 +2,8 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 
 dotenv.config();
 
@@ -93,47 +95,28 @@ interface EditVariant {
   instructions: EditInstruction[];
 }
 
-// System prompt for edit generation
-const EDIT_GENERATION_PROMPT = `You are a UI design variation generator. Given metadata about a Figma frame's layers, you generate 5 distinct creative variations by producing JSON instructions that modify the design.
+// Load system prompt from file
+// Use EDIT_PROMPT_FILE env var to specify a custom prompt file, or defaults to 'default.txt'
+const promptFileName = process.env.EDIT_PROMPT_FILE || 'default.txt';
+const promptFilePath = path.join(__dirname, 'prompts', promptFileName);
 
-## Available Actions
-- move: Change layer position {action: "move", target: "layer_name", x: number, y: number, relative?: boolean}
-- changeFill: Change fill color {action: "changeFill", target: "layer_name", color: "#RRGGBB", opacity?: 0-1}
-- changeStroke: Change stroke {action: "changeStroke", target: "layer_name", color: "#RRGGBB", opacity?: 0-1, weight?: number}
-- changeText: Change text content {action: "changeText", target: "layer_name", content: "new text"}
-- resize: Change dimensions {action: "resize", target: "layer_name", width?: number, height?: number, scale?: number}
-- changeOpacity: Change layer opacity {action: "changeOpacity", target: "layer_name", opacity: 0-1}
-- reorder: Change z-index {action: "reorder", target: "layer_name", position: "front" | "back"}
-
-## Guidelines
-1. Each variant should be distinctly different (e.g., color themes, layout changes, text variations)
-2. Target layers by their EXACT NAME as provided in the metadata
-3. Consider the design context - maintain visual harmony
-4. Suggest meaningful variations:
-   - Color scheme changes (light/dark, warm/cool, brand colors)
-   - Layout adjustments (spacing, alignment, repositioning)
-   - Text alternatives (different CTAs, headlines, descriptions)
-   - Visual emphasis changes (opacity, size adjustments)
-5. Limit each variant to 3-8 instructions for focused changes
-6. Ensure instructions are executable (valid hex colors like #FF5500, reasonable dimensions)
-7. Do NOT reference layers that don't exist in the metadata
-
-## Output Format
-Return ONLY a valid JSON object with this exact structure:
-{
-  "variants": [
-    {
-      "variantIndex": 1,
-      "humanPrompt": "Brief description of changes",
-      "theme": "Theme Name",
-      "instructions": [
-        {"action": "changeFill", "target": "exact_layer_name", "color": "#RRGGBB"}
-      ]
-    }
-  ]
+let EDIT_GENERATION_PROMPT: string;
+try {
+  // Try loading from the prompts directory relative to this file
+  EDIT_GENERATION_PROMPT = fs.readFileSync(promptFilePath, 'utf-8');
+  console.log(`Loaded edit prompt from: ${promptFilePath}`);
+} catch {
+  // Fallback: try loading from source location (for ts-node dev mode)
+  const devPromptPath = path.join(__dirname, '..', 'prompts', promptFileName);
+  try {
+    EDIT_GENERATION_PROMPT = fs.readFileSync(devPromptPath, 'utf-8');
+    console.log(`Loaded edit prompt from: ${devPromptPath}`);
+  } catch {
+    console.error(`Failed to load prompt file: ${promptFileName}`);
+    console.error(`Looked in: ${promptFilePath} and ${devPromptPath}`);
+    process.exit(1);
+  }
 }
-
-Provide exactly 5 variants. No markdown, no explanation, just valid JSON.`;
 
 // Build the user prompt with layer metadata
 function buildEditPrompt(
@@ -372,6 +355,10 @@ Endpoints:
   GET  /health              - Health check
   POST /api/rename-layers   - Rename layers using AI
   POST /api/generate-edits  - Generate 5 design variations
+
+Config:
+  Edit prompt file: ${promptFileName}
+  (Set EDIT_PROMPT_FILE env var to use a different prompt)
 
 Ready to receive requests from Figma plugin.
 `);

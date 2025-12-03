@@ -18,19 +18,28 @@ From the parent directory:
 
 ## Configuration
 
-Create a `.env` file with:
+Copy `.env.example` to `.env` and configure:
 ```
 GEMINI_API_KEY=your_api_key_here
-PORT=3000  # optional, defaults to 3000
+PORT=3000                        # optional, defaults to 3000
+EDIT_PROMPT_FILE=default.txt     # optional, prompt file from prompts/ directory
 ```
+
+### Custom Prompts
+
+The system prompt for edit generation is externalized to `prompts/default.txt`. To test different prompts:
+1. Create a new file in `prompts/` (e.g., `prompts/experimental.txt`)
+2. Set `EDIT_PROMPT_FILE=experimental.txt` in your `.env`
+3. Restart the server
 
 ## Architecture
 
 ### Single-File Server (`index.ts`)
 
-Express server with two endpoints:
+Express server with three endpoints:
 - `GET /health` - Health check returning `{ status: 'ok', service: 'exporter-server' }`
-- `POST /api/rename-layers` - Main endpoint for AI layer renaming
+- `POST /api/rename-layers` - AI layer renaming using Gemini Vision
+- `POST /api/generate-edits` - Generate 5 design variations with JSON edit instructions
 
 ### API Contract
 
@@ -56,12 +65,52 @@ Express server with two endpoints:
 }
 ```
 
+**Request** (`POST /api/generate-edits`):
+```typescript
+{
+  frameName: string;      // Name of the frame
+  frameWidth: number;     // Frame width in pixels
+  frameHeight: number;    // Frame height in pixels
+  layers: Array<{
+    name: string;         // Layer name (used for targeting)
+    type: string;         // Layer type (TEXT, RECTANGLE, etc.)
+    x: number; y: number; // Position
+    width: number; height: number;
+    fills?: Array<{ type: string; color?: string; opacity?: number }>;
+    text?: string;        // For TEXT layers
+  }>
+}
+```
+
+**Response**:
+```typescript
+{
+  variants: Array<{
+    variantIndex: number;
+    humanPrompt: string;  // Description of changes
+    theme: string;        // Theme name (e.g., "Dark Mode")
+    instructions: Array<{
+      action: 'move' | 'changeFill' | 'changeStroke' | 'changeText' | 'resize' | 'changeOpacity' | 'reorder';
+      target: string;     // Layer name to modify
+      // Action-specific properties...
+    }>
+  }>
+}
+```
+
 ### Gemini Integration
 
+**Layer Renaming** (`/api/rename-layers`):
 - Uses `gemini-2.5-flash-lite-preview-09-2025` model for vision analysis
 - Prompt instructs model to return 3-5 word snake_case names
 - Response is cleaned: quotes removed, spaces converted to underscores, special characters stripped
 - Falls back to original name on API errors
+
+**Edit Generation** (`/api/generate-edits`):
+- Uses `gemini-2.0-flash` model for generating variations
+- System prompt loaded from `prompts/` directory (configurable via `EDIT_PROMPT_FILE`)
+- Returns 5 creative design variations with executable JSON instructions
+- Instructions are validated against provided layer names
 
 ### Request Handling
 
