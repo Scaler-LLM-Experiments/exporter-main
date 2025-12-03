@@ -579,11 +579,247 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
   });
 }
 
-figma.ui.onmessage = async (msg: { type: string; format?: string; scale?: number }) => {
+// ============================================
+// AI Layer Renaming Functions
+// ============================================
+
+// Export layer images for AI renaming (at 1x scale for efficient processing)
+async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promise<void> {
+  figma.ui.postMessage({
+    type: 'progress',
+    message: 'Preparing layers for AI analysis...'
+  });
+
+  const allLayers: SceneNode[] = [];
+  if ('children' in frame) {
+    for (const child of frame.children) {
+      collectLayers(child, allLayers);
+    }
+  }
+
+  const layerExports: Array<{
+    id: string;
+    name: string;
+    type: string;
+    imageData: string;
+  }> = [];
+
+  // Export each layer as PNG at 1x scale for AI analysis
+  for (let i = 0; i < allLayers.length; i++) {
+    const layer = allLayers[i];
+
+    figma.ui.postMessage({
+      type: 'progress',
+      message: `Exporting layer ${i + 1}/${allLayers.length}: ${layer.name}`
+    });
+
+    try {
+      const bytes = await layer.exportAsync({
+        format: 'PNG',
+        constraint: { type: 'SCALE', value: 1 }
+      });
+      layerExports.push({
+        id: layer.id,
+        name: layer.name,
+        type: layer.type,
+        imageData: figma.base64Encode(bytes)
+      });
+    } catch (error) {
+      console.error(`Failed to export layer ${layer.name}:`, error);
+      // Still include the layer but without image data
+      layerExports.push({
+        id: layer.id,
+        name: layer.name,
+        type: layer.type,
+        imageData: ''
+      });
+    }
+  }
+
+  figma.ui.postMessage({
+    type: 'layers-for-renaming',
+    frameId: frame.id,
+    frameName: frame.name,
+    layers: layerExports
+  });
+}
+
+// Apply AI-generated names to layers in Figma
+function applyLayerRenames(renames: Array<{ id: string; newName: string }>): void {
+  console.log('[Plugin] applyLayerRenames called with', renames.length, 'renames');
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const rename of renames) {
+    console.log('[Plugin] Looking for node:', rename.id, '-> new name:', rename.newName);
+    const node = figma.getNodeById(rename.id);
+    console.log('[Plugin] Node found:', node ? 'yes' : 'no', node ? `(type: ${node.type})` : '');
+    if (node && 'name' in node) {
+      try {
+        const oldName = node.name;
+        node.name = rename.newName;
+        console.log('[Plugin] Renamed:', oldName, '->', rename.newName);
+        successCount++;
+      } catch (error) {
+        console.error(`[Plugin] Failed to rename node ${rename.id}:`, error);
+        failCount++;
+      }
+    } else {
+      console.warn(`[Plugin] Node not found or cannot be renamed: ${rename.id}`);
+      failCount++;
+    }
+  }
+
+  console.log('[Plugin] Rename complete. Success:', successCount, 'Fail:', failCount);
+  figma.ui.postMessage({
+    type: 'renames-applied',
+    successCount,
+    failCount,
+    totalCount: renames.length
+  });
+}
+
+// Duplicate the selected frame 5 times and export all 6 versions
+async function duplicateFrameAndExport(
+  originalFrame: FrameNode | ComponentNode,
+  format: string,
+  scale: number
+): Promise<void> {
+  const framesToExport: (FrameNode | ComponentNode)[] = [originalFrame];
+  const originalName = originalFrame.name;
+
+  figma.ui.postMessage({
+    type: 'progress',
+    message: 'Creating frame duplicates...'
+  });
+
+  // Create 5 duplicates with numbered suffixes
+  for (let i = 1; i <= 5; i++) {
+    const clone = originalFrame.clone();
+    clone.name = `${originalName}_${i}`;
+    // Position clones to the right of the original with 50px gap
+    clone.x = originalFrame.x + (originalFrame.width + 50) * i;
+    framesToExport.push(clone as FrameNode | ComponentNode);
+  }
+
+  figma.ui.postMessage({
+    type: 'progress',
+    message: `Created 5 duplicates. Exporting ${framesToExport.length} frames...`
+  });
+
+  // Export all 6 frames
+  const totalFrames = framesToExport.length;
+  for (let i = 0; i < totalFrames; i++) {
+    await exportFrame(framesToExport[i], i, totalFrames, format, scale);
+  }
+
+  figma.ui.postMessage({
+    type: 'all-exports-complete'
+  });
+}
+
+// ============================================
+// Message Handler
+// ============================================
+
+interface PluginMessage {
+  type: string;
+  format?: string;
+  scale?: number;
+  renames?: Array<{ id: string; newName: string }>;
+}
+
+figma.ui.onmessage = async (msg: PluginMessage) => {
+  console.log('[Plugin] Received message:', msg.type, JSON.stringify(msg));
+
   if (msg.type === 'cancel') {
     figma.closePlugin();
     return;
   }
+
+  // ============================================
+  // AI Rename + Export Flow (new)
+  // ============================================
+
+  // Step 1: Export layers for AI renaming
+  if (msg.type === 'export-for-renaming') {
+    try {
+      const selection = figma.currentPage.selection;
+      const frames = selection.filter(
+        node => node.type === 'FRAME' || node.type === 'COMPONENT'
+      ) as (FrameNode | ComponentNode)[];
+
+      if (frames.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Please select a frame to export'
+        });
+        return;
+      }
+
+      // Process only the first selected frame for renaming
+      await exportLayersForRenaming(frames[0]);
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to export layers for renaming: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // Step 2: Apply AI-generated names to layers
+  if (msg.type === 'apply-renames') {
+    console.log('[Plugin] Received apply-renames message');
+    console.log('[Plugin] Renames:', JSON.stringify(msg.renames));
+    if (msg.renames && msg.renames.length > 0) {
+      console.log('[Plugin] Applying', msg.renames.length, 'renames');
+      applyLayerRenames(msg.renames);
+    } else {
+      console.log('[Plugin] No renames to apply');
+      figma.ui.postMessage({
+        type: 'renames-applied',
+        successCount: 0,
+        failCount: 0,
+        totalCount: 0
+      });
+    }
+    return;
+  }
+
+  // Step 3: Duplicate frame and export all copies
+  if (msg.type === 'duplicate-and-export') {
+    try {
+      const selection = figma.currentPage.selection;
+      const frames = selection.filter(
+        node => node.type === 'FRAME' || node.type === 'COMPONENT'
+      ) as (FrameNode | ComponentNode)[];
+
+      if (frames.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Please select a frame to export'
+        });
+        return;
+      }
+
+      await duplicateFrameAndExport(
+        frames[0],
+        msg.format || 'png',
+        msg.scale || 4
+      );
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to duplicate and export: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // ============================================
+  // Original Export Flow (unchanged)
+  // ============================================
 
   if (msg.type === 'export-frame') {
     try {

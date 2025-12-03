@@ -14,6 +14,8 @@ This is a Figma plugin called "exporter" that exports frames and their layers as
 - **Reconstruct image**: `npm run reconstruct <folder-path>` - Rebuilds composite image from exported layers
 - **Lint**: `npm run lint` - Check code with ESLint
 - **Fix lint issues**: `npm run lint:fix` - Auto-fix ESLint issues
+- **Start AI server**: `npm run server` - Starts the backend server for AI layer renaming (requires `npm run server:install` first)
+- **Install server deps**: `npm run server:install` - Installs dependencies for the AI server
 
 Note: The compiled `code.js` is what Figma executes, not `code.ts` directly.
 
@@ -30,7 +32,8 @@ Figma plugins run in two separate contexts that communicate via message passing:
 
 2. **UI Context** (`ui.html`):
    - Full browser environment with standard web APIs
-   - Displays plugin interface with format selection (PNG/SVG) and resolution options (1x-5x)
+   - Displays plugin interface with frame selection indicator and export button
+   - Currently hardcoded to export PNG at 4x resolution
    - Uses JSZip library (loaded from CDN) to create downloadable ZIP files
    - Reconstructs composite images client-side using Canvas API (PNG) or SVG composition (SVG)
    - Communicates with main context via `parent.postMessage()`
@@ -82,6 +85,30 @@ The plugin provides two reconstruction methods:
 
 Both reconstruction methods use the same algorithm: sort layers by z-index, apply scale factor to all coordinates, and composite layers in order using export bounds for positioning.
 
+### AI Layer Renaming (Backend Server)
+
+The plugin includes an optional AI-powered layer renaming feature that uses Google's Gemini Vision API:
+
+1. **Backend Server** (`server/index.ts`):
+   - Express server running on `localhost:3000`
+   - Receives layer images from the plugin UI
+   - Sends images to Gemini Vision API for analysis
+   - Returns AI-generated concise names (3-5 words, snake_case format)
+   - Requires `GEMINI_API_KEY` environment variable (copy `server/.env.example` to `server/.env`)
+
+2. **Flow**:
+   - User clicks "AI Rename + Export (6 frames)" button
+   - Plugin exports each layer as 1x PNG
+   - UI sends images to backend server
+   - Backend calls Gemini Vision for each layer
+   - Plugin receives AI names and renames layers in Figma document
+   - Plugin creates 5 duplicate frames (with `_1` to `_5` suffixes)
+   - All 6 frames are exported with AI-generated layer names in metadata
+
+3. **Network Access**:
+   - `devAllowedDomains` in `manifest.json` allows `localhost:3000` during development
+   - Plugin UI makes HTTP requests to the backend (plugin main context cannot make network calls)
+
 ### Key Configuration Files
 
 - **manifest.json**: Figma plugin configuration
@@ -105,10 +132,10 @@ Both reconstruction methods use the same algorithm: sort layers by z-index, appl
 
 ## Development Notes
 
-- TypeScript must be compiled before testing the plugin in Figma
-- The plugin can export multiple selected frames at once, creating a separate ZIP for each
-- Export format (PNG/SVG) and resolution (1x-5x for PNG) are user-selectable
-- User preferences (format and resolution) are saved to localStorage
-- The plugin closes automatically 2 seconds after successful export
+- TypeScript must be compiled (`npm run build`) before testing the plugin in Figma
+- The plugin has two export modes:
+  - **Export Only**: Exports selected frame as PNG at 4x resolution
+  - **AI Rename + Export**: Renames layers using AI, duplicates frame 5 times, exports all 6 frames
 - ESLint is configured to ignore unused variables that start with underscore
 - The reconstruction script (`reconstruct.ts`) requires the `sharp` npm package for image processing
+- For AI renaming: start the backend server (`npm run server`) and ensure `GEMINI_API_KEY` is set in `server/.env`
