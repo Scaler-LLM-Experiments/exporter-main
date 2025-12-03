@@ -404,6 +404,49 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  /* Input Field Styles */
+  .input-container {
+    margin: 0 0 1.5rem 0;
+  }
+
+  .input-container label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: hsl(var(--foreground));
+  }
+
+  input[type="email"],
+  input[type="text"] {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    transition: all 150ms ease;
+  }
+
+  input[type="email"]:hover,
+  input[type="text"]:hover {
+    border-color: hsl(var(--foreground) / 0.3);
+  }
+
+  input[type="email"]:focus,
+  input[type="text"]:focus {
+    outline: none;
+    border-color: hsl(var(--foreground));
+    box-shadow: 0 0 0 2px hsl(var(--foreground) / 0.1);
+  }
+
+  input[type="email"]::placeholder,
+  input[type="text"]::placeholder {
+    color: hsl(var(--muted-foreground));
+  }
 </style>
 
 <h2>Exporter</h2>
@@ -423,6 +466,11 @@
     </svg>
   </div>
   <div class="frame-name" id="frame-name">Select Frame to Export</div>
+</div>
+
+<div class="input-container">
+  <label for="user-email">Your Email</label>
+  <input type="email" id="user-email" placeholder="your.email@example.com" />
 </div>
 
 <button id="break-groups">
@@ -503,6 +551,7 @@
   const checkmarks = document.querySelectorAll('.checkmark');
   const progressStatus = document.getElementById('progress-status');
   const promptSelector = document.getElementById('prompt-selector');
+  const userEmailInput = document.getElementById('user-email');
 
   // Backend server URL
   // IMPORTANT: Update this to your Railway URL after deployment!
@@ -510,8 +559,24 @@
   const BACKEND_URL = 'https://asli-designer-production.up.railway.app'; // Railway production URL
   console.log('[UI] Backend URL:', BACKEND_URL);
 
-  // Store user email (captured from plugin messages)
-  let currentUserEmail = 'unknown@figma.local';
+  // Store user email (from input field)
+  let currentUserEmail = localStorage.getItem('figma-exporter-email') || '';
+
+  // Load saved email into input field
+  if (currentUserEmail) {
+    userEmailInput.value = currentUserEmail;
+  }
+
+  // Save email to localStorage when it changes
+  userEmailInput.addEventListener('input', (e) => {
+    currentUserEmail = e.target.value.trim();
+    if (currentUserEmail) {
+      localStorage.setItem('figma-exporter-email', currentUserEmail);
+      console.log('[UI] Email saved:', currentUserEmail);
+    } else {
+      localStorage.removeItem('figma-exporter-email');
+    }
+  });
 
   // Store selected prompt file
   let selectedPromptFile = 'default.txt';
@@ -847,12 +912,6 @@
     // AI Rename Flow - Process layers through AI
     // ============================================
     if (msg.type === 'layers-for-renaming') {
-      // Capture user email
-      if (msg.userEmail) {
-        currentUserEmail = msg.userEmail;
-        console.log('[UI] User email captured:', currentUserEmail);
-      }
-
       console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
       console.log('[UI] Layer IDs:', msg.layers.map(l => l.id));
       try {
@@ -921,12 +980,6 @@
     // Generate Edits Flow - Receive metadata and call AI
     // ============================================
     if (msg.type === 'metadata-for-edits') {
-      // Capture user email
-      if (msg.userEmail) {
-        currentUserEmail = msg.userEmail;
-        console.log('[UI] User email captured:', currentUserEmail);
-      }
-
       console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
       console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
       try {
