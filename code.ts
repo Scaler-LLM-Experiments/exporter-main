@@ -2390,6 +2390,8 @@ interface PluginMessage {
   scale?: number;
   renames?: Array<{ id: string; newName: string }>;
   variants?: EditVariant[];
+  processAllFrames?: boolean;
+  frameVariants?: Array<{ frameId: string; frameName: string; variants: EditVariant[] }>;
 }
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
@@ -2659,7 +2661,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       }
 
       // Send success message
-      const totalVariants = frameVariants.reduce((sum, fv) => sum + (fv.variants?.length || 0), 0);
+      const totalVariants = frameVariants.reduce((sum: number, fv: any) => sum + (fv.variants?.length || 0), 0);
       figma.ui.postMessage({
         type: 'variants-created',
         variantCount: totalVariants,
