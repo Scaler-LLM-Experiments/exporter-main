@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -139,6 +139,14 @@ interface OpenRouterRequest {
   temperature?: number;
   max_tokens?: number;
   include_reasoning?: boolean;
+  response_format?: {
+    type: 'json_schema';
+    json_schema: {
+      name: string;
+      strict?: boolean;
+      schema: Record<string, any>;
+    };
+  };
 }
 
 interface OpenRouterImageData {
@@ -779,10 +787,10 @@ Rules:
 Layers to rename:
 ${layerList}
 
-Respond with a JSON array of exactly ${batchSize} names in the same order as the images.
-Example format: ["blue_submit_button", "main_header_text", "profile_icon"]
+Respond with a JSON object containing a "names" array with exactly ${batchSize} names in the same order as the images.
+Example format: {"names": ["blue_submit_button", "main_header_text", "profile_icon"]}
 
-IMPORTANT: Return ONLY the JSON array, no additional text or explanation.`;
+IMPORTANT: Return ONLY the JSON object, no additional text or explanation.`;
 
   try {
     let text: string;
@@ -808,7 +816,27 @@ IMPORTANT: Return ONLY the JSON array, no additional text or explanation.`;
           content
         }],
         temperature: 0.3,
-        max_tokens: 500
+        max_tokens: 500,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'layer_names',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                names: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  minItems: batchSize,
+                  maxItems: batchSize
+                }
+              },
+              required: ['names'],
+              additionalProperties: false
+            }
+          }
+        }
       });
 
       if (!response.ok) {
@@ -817,13 +845,28 @@ IMPORTANT: Return ONLY the JSON array, no additional text or explanation.`;
       }
 
       const data = await response.json() as OpenRouterResponse;
-      text = data.choices?.[0]?.message?.content?.trim() || '[]';
+      text = data.choices?.[0]?.message?.content?.trim() || '{"names":[]}';
     } else {
       // Direct Gemini path - build content with all images
       if (!genAI) {
         throw new Error('Gemini client not initialized');
       }
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-09-2025' });
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash-lite-preview-09-2025',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: SchemaType.OBJECT,
+            properties: {
+              names: {
+                type: SchemaType.ARRAY,
+                items: { type: SchemaType.STRING }
+              }
+            },
+            required: ['names']
+          }
+        }
+      });
 
       const content: Array<string | { inlineData: { mimeType: string; data: string } }> = [prompt];
 
@@ -847,7 +890,16 @@ IMPORTANT: Return ONLY the JSON array, no additional text or explanation.`;
 
     let names: string[];
     try {
-      names = JSON.parse(text);
+      const parsed = JSON.parse(text);
+      // Handle structured output format {names: [...]}
+      if (parsed && typeof parsed === 'object' && 'names' in parsed) {
+        names = parsed.names;
+      } else if (Array.isArray(parsed)) {
+        // Handle legacy array format for backward compatibility
+        names = parsed;
+      } else {
+        throw new Error('Response is not in expected format');
+      }
     } catch (parseError) {
       console.error('Failed to parse JSON response:', text);
       // Fallback: try to extract array from text
@@ -970,6 +1022,18 @@ app.post('/api/rename-layers', renameRateLimiter, haltOnTimedout, async (req: Re
 
     if (!layers || !Array.isArray(layers)) {
       res.status(400).json({ error: 'Invalid request: layers array required' });
+      return;
+    }
+
+    // Skip frames with more than 100 layers
+    if (layers.length > 100) {
+      console.log(`⚠️  Skipping rename: Frame has ${layers.length} layers (max 100 allowed)`);
+      res.status(400).json({
+        error: 'Too many layers',
+        message: `Frame has ${layers.length} layers. Maximum 100 layers allowed for AI renaming.`,
+        layerCount: layers.length,
+        maxLayers: 100
+      });
       return;
     }
 
@@ -1098,12 +1162,12 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
     // Get IP address
     const ipAddress = req.ip || req.socket.remoteAddress || null;
 
-    // Create job in database (5 variants expected)
+    // Create job in database (10 variants expected)
     const jobResult = await dbQuery(
       `INSERT INTO jobs (type, status, frame_name, variant_count, user_email, ip_address)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      ['generate-edits', 'processing', frameName, 5, userEmail || null, ipAddress]
+      ['generate-edits', 'processing', frameName, 10, userEmail || null, ipAddress]
     );
     jobId = jobResult.rows[0]?.id || null;
 

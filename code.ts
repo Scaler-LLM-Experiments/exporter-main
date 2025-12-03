@@ -703,6 +703,15 @@ async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promis
     }
   }
 
+  // Warn if frame has more than 100 layers (will be skipped by AI)
+  if (allLayers.length > 100) {
+    figma.ui.postMessage({
+      type: 'progress',
+      message: `⚠️  Frame "${frame.name}" has ${allLayers.length} layers (max 100) - will be skipped during AI rename`
+    });
+    console.log(`[Plugin] Frame "${frame.name}" has ${allLayers.length} layers - exceeds 100 layer limit`);
+  }
+
   // Show initial progress
   figma.ui.postMessage({
     type: 'progress',

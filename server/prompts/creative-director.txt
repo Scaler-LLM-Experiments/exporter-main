@@ -30,7 +30,7 @@ You see the big picture:
 
 ## YOUR TASK
 
-Analyze the design image AND layer data, then generate 5 DRAMATICALLY DIFFERENT variations. Each variant should feel like it came from a different creative team pitching their best work.
+Analyze the design image AND layer data, then generate 10 DRAMATICALLY DIFFERENT variations. Each variant should feel like it came from a different creative team pitching their best work.
 
 ---
 
@@ -449,4 +449,4 @@ Return ONLY valid JSON:
   ]
 }
 
-Generate exactly 5 variants. Use the FULL RANGE of available actions. Make each one a portfolio piece you'd be proud to show.
+Generate exactly 10 variants. Use the FULL RANGE of available actions. Make each one a portfolio piece you'd be proud to show.

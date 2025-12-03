@@ -519,7 +519,7 @@
   <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
   </svg>
-  <span class="btn-text">Generate Edits (5 variants)</span>
+  <span class="btn-text">Generate Edits (10 variants)</span>
 </button>
 <button id="export">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
@@ -599,7 +599,7 @@
     if (button.id === 'ai-rename') {
       defaultText = 'AI Rename Layers';
     } else if (button.id === 'generate-edits') {
-      defaultText = 'Generate Edits (5 variants)';
+      defaultText = 'Generate Edits (10 variants)';
     } else if (button.id === 'break-groups') {
       defaultText = 'Break Groups';
     } else if (button.id === 'rasterize') {
@@ -678,8 +678,8 @@
   }
 
   async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64, generateImages = false) {
-    console.log(`[API] 🎨 Generating 5 design variants for "${frameName}" (${frameWidth}×${frameHeight}, ${layers.length} layers)`);
-    console.log(`[API] ⏳ AI is thinking... this may take 10-30 seconds`);
+    console.log(`[API] 🎨 Generating 10 design variants for "${frameName}" (${frameWidth}×${frameHeight}, ${layers.length} layers)`);
+    console.log(`[API] ⏳ AI is thinking... this may take 20-40 seconds`);
     const startTime = Date.now();
 
     const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
@@ -1001,6 +1001,14 @@
           const batchPromises = batch.map((frame, batchIndex) => {
             const frameIndex = batchStart + batchIndex;
             const layerCount = frame.layers.filter(l => l.imageData).length;
+
+            // Skip frames with more than 100 layers
+            if (layerCount > 100) {
+              console.log(`  ⏭️  [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - SKIPPED (${layerCount} layers > 100 max)`);
+              showProgress(`⏭️  Skipped [${frameIndex + 1}/${totalFrames}]: ${frame.frameName} (${layerCount} layers, max 100)`);
+              return Promise.resolve([]); // Return empty array for skipped frames
+            }
+
             console.log(`  🎯 [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${layerCount} layers`);
 
             // Update UI with individual frame progress
@@ -1014,6 +1022,13 @@
 
               return result.layers; // Return just the renames array
             }).catch(error => {
+              // Check if error is due to too many layers
+              if (error.message.includes('Too many layers') || error.message.includes('Maximum 100 layers')) {
+                console.log(`  ⏭️  [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - SKIPPED (too many layers)`);
+                showProgress(`⏭️  Skipped [${frameIndex + 1}/${totalFrames}]: ${frame.frameName} (too many layers)`);
+                return []; // Return empty array for skipped frames
+              }
+
               console.error(`  ❌ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - Error: ${error.message}`);
 
               // Update UI showing error
@@ -1112,10 +1127,10 @@
 
       // If multiple frames, ask for confirmation
       if (frameCount > 1) {
-        const totalVariants = frameCount * 5;
+        const totalVariants = frameCount * 10;
         const confirmed = confirm(
           `You have ${frameCount} frames selected.\n\n` +
-          `This will generate ${totalVariants} total variants (5 for each frame).\n\n` +
+          `This will generate ${totalVariants} total variants (10 for each frame).\n\n` +
           `This may take several minutes and will use more AI credits.\n\n` +
           `Do you want to continue?`
         );

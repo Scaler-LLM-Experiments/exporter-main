@@ -49,7 +49,7 @@ Design that works for everyone:
 
 ## YOUR TASK
 
-Analyze the design image AND layer data, then generate 5 DISTINCTLY DIFFERENT layout and UI variations. Each variant should demonstrate professional UI design principles while creating meaningfully different user experiences.
+Analyze the design image AND layer data, then generate 10 DISTINCTLY DIFFERENT layout and UI variations. Each variant should demonstrate professional UI design principles while creating meaningfully different user experiences.
 
 ---
 
@@ -528,4 +528,4 @@ Return ONLY valid JSON:
 }
 ```
 
-Generate exactly 5 variants. Each should demonstrate professional UI design principles. Provide 8-15 instructions per variant. Be PRECISE with pixel values - always use 8pt grid multiples.
+Generate exactly 10 variants. Each should demonstrate professional UI design principles. Provide 8-15 instructions per variant. Be PRECISE with pixel values - always use 8pt grid multiples.
