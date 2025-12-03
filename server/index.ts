@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import timeout from 'connect-timeout';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { renameLimiter, imageLimiter, processWithConcurrency } from './lib/concurrency';
 import { apiLimiter, heavyLimiter, renameRateLimiter } from './lib/rateLimiter';
 import { query as dbQuery } from './lib/db';
@@ -21,7 +22,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type']
 }));
 
-app.use(express.json({ limit: '100mb' }));
+app.use(express.json({ limit: '4gb' }));
+app.use(express.urlencoded({ limit: '4gb', extended: true }));
 
 // ============================================
 // Timeouts and Monitoring
@@ -82,6 +84,33 @@ console.log(`AI Provider: ${AI_PROVIDER.toUpperCase()}`);
 const genAI = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
+
+// ============================================
+// AWS S3 Client Configuration
+// ============================================
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || ''
+  }
+});
+
+const S3_BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
+const S3_FOLDER_PREFIX = process.env.S3_FOLDER_PREFIX || ''; // Optional folder prefix
+
+// Validate S3 configuration
+if (!S3_BUCKET_NAME) {
+  console.warn('⚠️  S3_BUCKET_NAME not configured. S3 uploads will be disabled.');
+}
+if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+  console.warn('⚠️  AWS credentials not configured. S3 uploads will be disabled.');
+}
+
+const isS3Enabled = !!(S3_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
+const s3PathInfo = S3_FOLDER_PREFIX ? `${S3_BUCKET_NAME}/${S3_FOLDER_PREFIX}/` : `${S3_BUCKET_NAME}/`;
+console.log(`S3 Uploads: ${isS3Enabled ? 'ENABLED' : 'DISABLED'}${isS3Enabled ? ` (path: ${s3PathInfo})` : ''}`);
 
 // ============================================
 // OpenRouter Client (only used when AI_PROVIDER=openrouter)
@@ -1249,6 +1278,117 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
   }
 });
 
+// ============================================
+// S3 Upload Endpoint
+// ============================================
+
+app.post('/api/upload-to-s3', heavyLimiter, async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  let jobId: string | null = null;
+
+  try {
+    const { frameName, zipData, userEmail, variantCount, fileSizeBytes } = req.body;
+
+    if (!isS3Enabled) {
+      res.status(503).json({ error: 'S3 uploads are not configured on this server' });
+      return;
+    }
+
+    if (!frameName || !zipData) {
+      res.status(400).json({ error: 'Invalid request: frameName and zipData required' });
+      return;
+    }
+
+    console.log(`[S3 Upload] Starting upload for ${frameName}.zip (${Math.round((fileSizeBytes || 0) / 1024)}KB)`);
+
+    // Get IP address
+    const ipAddress = req.ip || req.socket.remoteAddress || null;
+
+    // Create job in database
+    const jobResult = await dbQuery(
+      `INSERT INTO jobs (type, status, frame_name, variant_count, user_email, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      ['s3-upload', 'processing', frameName, variantCount || null, userEmail || null, ipAddress]
+    );
+    jobId = jobResult.rows[0]?.id || null;
+
+    // Convert base64 to buffer
+    const buffer = Buffer.from(zipData, 'base64');
+    const fileName = `${frameName}.zip`;
+
+    // Construct S3 key with optional folder prefix
+    const s3Key = S3_FOLDER_PREFIX ? `${S3_FOLDER_PREFIX}/${fileName}` : fileName;
+
+    // Upload to S3
+    const uploadCommand = new PutObjectCommand({
+      Bucket: S3_BUCKET_NAME,
+      Key: s3Key,
+      Body: buffer,
+      ContentType: 'application/zip',
+      Metadata: {
+        'user-email': userEmail || 'unknown',
+        'variant-count': String(variantCount || 0),
+        'uploaded-at': new Date().toISOString()
+      }
+    });
+
+    await s3Client.send(uploadCommand);
+
+    const s3Url = `https://${S3_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${s3Key}`;
+
+    console.log(`[S3 Upload] ✓ Uploaded ${fileName} to S3: ${s3Url}`);
+
+    // Store S3 export record in database
+    await dbQuery(
+      `INSERT INTO s3_exports (job_id, frame_name, file_name, s3_url, s3_key, file_size_bytes, variant_count, user_email)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [jobId, frameName, fileName, s3Url, s3Key, fileSizeBytes || buffer.length, variantCount || null, userEmail || null]
+    );
+
+    const duration = Date.now() - startTime;
+
+    // Update job as completed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2
+         WHERE id = $3`,
+        ['completed', duration, jobId]
+      );
+    }
+
+    console.log(`[S3 Upload] Completed in ${duration}ms`);
+
+    res.json({
+      success: true,
+      s3Url,
+      fileName,
+      fileSizeBytes: buffer.length,
+      duration
+    });
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(`[Job ${jobId}] Error in /api/upload-to-s3:`, error);
+
+    // Update job as failed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2, error_message = $3, error_stack = $4
+         WHERE id = $5`,
+        ['failed', duration, (error as Error).message, (error as Error).stack || null, jobId]
+      );
+    }
+
+    res.status(500).json({
+      error: 'Failed to upload to S3',
+      message: (error as Error).message
+    });
+  }
+});
+
 app.listen(PORT, () => {
   const thinkingInfo = AI_PROVIDER === 'gemini'
     ? 'Thinking level: HIGH (maximum reasoning depth)'
@@ -1280,8 +1420,10 @@ Endpoints:
   GET  /health              - Health check
   POST /api/rename-layers   - Rename layers using AI
   POST /api/generate-edits  - Generate 5 design variations
+  POST /api/upload-to-s3    - Upload frame ZIPs to S3
 
 Config:
+  S3 Uploads: ${isS3Enabled ? 'ENABLED' : 'DISABLED'}${isS3Enabled ? ` (bucket: ${S3_BUCKET_NAME})` : ''}
   Edit prompt file: ${promptFileName}
   ${thinkingInfo}
   (Set AI_PROVIDER env var to switch: gemini | openrouter)

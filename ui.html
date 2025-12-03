@@ -705,6 +705,52 @@
     return response.json();
   }
 
+  async function uploadFrameToS3(frameName, zipBlob, variantCount, userEmail) {
+    try {
+      showProgress(`Uploading ${frameName}.zip to S3...`);
+      console.log(`[UI] Starting S3 upload for ${frameName}.zip (${Math.round(zipBlob.size / 1024)}KB)`);
+
+      // Convert blob to base64 using FileReader (more efficient for large files)
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          // Remove the "data:application/zip;base64," prefix
+          const base64String = reader.result.split(',')[1];
+          resolve(base64String);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(zipBlob);
+      });
+
+      const response = await fetch(`${BACKEND_URL}/api/upload-to-s3`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          frameName,
+          zipData: base64,
+          userEmail,
+          variantCount,
+          fileSizeBytes: zipBlob.size
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `S3 upload failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log(`[UI] ✓ Uploaded ${frameName}.zip to S3: ${result.s3Url}`);
+      showProgress(`✓ Uploaded ${frameName}.zip to S3 (${Math.round(result.fileSizeBytes / 1024)}KB)`);
+
+      return result;
+    } catch (error) {
+      console.error(`[UI] S3 upload failed for ${frameName}:`, error);
+      showProgress(`⚠️ S3 upload failed for ${frameName}: ${error.message}`);
+      // Don't throw - allow export to continue even if S3 upload fails
+    }
+  }
+
   // ============================================
   // Fetch and Populate Prompts
   // ============================================
@@ -1423,6 +1469,9 @@
           // Add frame-level ZIP to parent ZIP
           parentZip.file(`${baseFrameName}.zip`, frameZipBlob);
           console.log(`[UI] Added ${baseFrameName}.zip to parent ZIP`);
+
+          // Upload frame ZIP to S3
+          await uploadFrameToS3(baseFrameName, frameZipBlob, variants.length, currentUserEmail);
         }
 
         // Determine parent ZIP filename
