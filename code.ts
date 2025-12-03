@@ -691,12 +691,11 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
 // ============================================
 
 // Export layer images for AI renaming (at 1x scale for efficient processing)
-async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promise<void> {
-  figma.ui.postMessage({
-    type: 'progress',
-    message: 'Preparing layers for AI analysis...'
-  });
-
+async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promise<{
+  frameId: string;
+  frameName: string;
+  layers: Array<{ id: string; name: string; type: string; imageData: string }>;
+}> {
   const allLayers: SceneNode[] = [];
   if ('children' in frame) {
     for (const child of frame.children) {
@@ -743,12 +742,11 @@ async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promis
     }
   }
 
-  figma.ui.postMessage({
-    type: 'layers-for-renaming',
+  return {
     frameId: frame.id,
     frameName: frame.name,
     layers: layerExports
-  });
+  };
 }
 
 // Apply AI-generated names to layers in Figma
@@ -2461,8 +2459,26 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      // Process only the first selected frame for renaming
-      await exportLayersForRenaming(frames[0]);
+      // Process all selected frames for renaming
+      const allFrameData = [];
+      for (let i = 0; i < frames.length; i++) {
+        const frame = frames[i];
+
+        figma.ui.postMessage({
+          type: 'progress',
+          message: `Extracting layers from frame ${i + 1}/${frames.length}: ${frame.name}...`
+        });
+
+        const frameData = await exportLayersForRenaming(frame);
+        allFrameData.push(frameData);
+      }
+
+      // Send all frames to UI for parallel processing
+      figma.ui.postMessage({
+        type: 'all-frames-for-renaming',
+        frames: allFrameData,
+        totalFrames: allFrameData.length
+      });
     } catch (error) {
       figma.ui.postMessage({
         type: 'error',

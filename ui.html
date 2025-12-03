@@ -898,41 +898,77 @@
     }
 
     // ============================================
-    // AI Rename Flow - Process layers through AI
+    // AI Rename Flow - Process multiple frames through AI in parallel
     // ============================================
-    if (msg.type === 'layers-for-renaming') {
-      console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
-      console.log('[UI] Layer IDs:', msg.layers.map(l => l.id));
+    if (msg.type === 'all-frames-for-renaming') {
+      const frames = msg.frames || [];
+      const totalFrames = msg.totalFrames || frames.length;
+
+      console.log('[UI] Received all-frames-for-renaming:', totalFrames, 'frame(s)');
+
       try {
         setButtonState(aiRenameBtn, 'loading', 'AI analyzing...');
-        showProgress(`Sending ${msg.layers.length} layers to AI for naming...`);
 
-        // Call backend to get AI-generated names
-        console.log('[UI] Calling backend API...');
-        const result = await callRenamingAPI(msg.layers);
-        console.log('[UI] Backend response received:', JSON.stringify(result, null, 2));
+        // Process frames in parallel batches (3 at a time)
+        const BATCH_SIZE = 3;
+        const allRenames = [];
 
-        // Send renames back to plugin
+        for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
+          const batch = frames.slice(batchStart, batchEnd);
+
+          console.log(`[UI] Processing batch: frames ${batchStart + 1}-${batchEnd} of ${totalFrames}`);
+
+          // Update progress for batch
+          const batchFrameNames = batch.map(f => f.frameName).join(', ');
+          setButtonState(aiRenameBtn, 'loading', `AI analyzing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}...`);
+          showProgress(`AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames}...`);
+
+          // Process all frames in this batch in parallel
+          const batchPromises = batch.map((frame, batchIndex) => {
+            const frameIndex = batchStart + batchIndex;
+            console.log(`[UI] Starting parallel AI rename for frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${frame.layers.length} layers)`);
+
+            return callRenamingAPI(frame.layers).then(result => {
+              console.log(`[UI] Completed frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${result.layers.length} renames)`);
+              return result.layers; // Return just the renames array
+            });
+          });
+
+          // Wait for all frames in this batch to complete
+          const batchResults = await Promise.all(batchPromises);
+
+          // Flatten all renames from this batch
+          for (const renames of batchResults) {
+            allRenames.push(...renames);
+          }
+
+          console.log(`[UI] Batch complete: ${batchResults.length} frame(s) processed`);
+        }
+
+        console.log(`[UI] Total: ${allRenames.length} renames from ${totalFrames} frame(s)`);
+
+        // Send all renames back to plugin to apply
         setButtonState(aiRenameBtn, 'loading', 'Applying names...');
-        showProgress(`Applying ${result.layers.length} AI-generated names...`);
+        showProgress(`Applying ${allRenames.length} AI-generated names to ${totalFrames} frame(s)...`);
 
-        console.log('[UI] Sending apply-renames to plugin with renames:', result.layers);
+        console.log('[UI] Sending apply-renames to plugin with renames:', allRenames);
         parent.postMessage({
           pluginMessage: {
             type: 'apply-renames',
-            renames: result.layers
+            renames: allRenames
           }
         }, '*');
         console.log('[UI] apply-renames message sent');
       } catch (error) {
-        console.error('[UI] AI renaming failed:', error);
+        console.error('[UI] Rename failed:', error);
         setButtonState(aiRenameBtn, 'default');
         hideProgress();
 
         if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
           alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
         } else {
-          alert('AI renaming failed: ' + error.message);
+          alert('AI rename failed: ' + error.message);
         }
       }
       return;
@@ -1021,37 +1057,52 @@
         const generateImagesCheckbox = document.getElementById('generate-images');
         const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
 
-        // Process each frame sequentially
+        // Process frames in parallel batches (3 at a time for optimal performance)
+        const BATCH_SIZE = 3;
         const allFrameVariants = [];
 
-        for (let i = 0; i < frames.length; i++) {
-          const frame = frames[i];
-          console.log(`[UI] Processing frame ${i + 1}/${totalFrames}: ${frame.frameName}`);
+        // Process frames in batches
+        for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
+          const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
+          const batch = frames.slice(batchStart, batchEnd);
 
-          setButtonState(generateEditsBtn, 'loading', `AI analyzing ${i + 1}/${totalFrames}...`);
+          console.log(`[UI] Processing batch: frames ${batchStart + 1}-${batchEnd} of ${totalFrames}`);
+
+          // Update progress for batch
+          const batchFrameNames = batch.map(f => f.frameName).join(', ');
+          setButtonState(generateEditsBtn, 'loading', `AI analyzing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}...`);
           const progressMsg = generateImages
-            ? `AI analyzing frame ${i + 1}/${totalFrames}: "${frame.frameName}" (with AI images)...`
-            : `AI analyzing frame ${i + 1}/${totalFrames}: "${frame.frameName}"...`;
+            ? `AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames} (with AI images)...`
+            : `AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames}...`;
           showProgress(progressMsg);
 
-          // Call backend to generate edit variants
-          const result = await callGenerateEditsAPI(
-            frame.frameName,
-            frame.frameWidth,
-            frame.frameHeight,
-            frame.layers,
-            frame.frameImageBase64,
-            generateImages
-          );
+          // Process all frames in this batch in parallel
+          const batchPromises = batch.map((frame, batchIndex) => {
+            const frameIndex = batchStart + batchIndex;
+            console.log(`[UI] Starting parallel processing for frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName}`);
 
-          console.log(`[UI] Generated ${result.variants.length} variants for ${frame.frameName}`);
-
-          // Store variants with frame ID for later association
-          allFrameVariants.push({
-            frameId: frame.frameId,
-            frameName: frame.frameName,
-            variants: result.variants
+            return callGenerateEditsAPI(
+              frame.frameName,
+              frame.frameWidth,
+              frame.frameHeight,
+              frame.layers,
+              frame.frameImageBase64,
+              generateImages
+            ).then(result => {
+              console.log(`[UI] Completed frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${result.variants.length} variants)`);
+              return {
+                frameId: frame.frameId,
+                frameName: frame.frameName,
+                variants: result.variants
+              };
+            });
           });
+
+          // Wait for all frames in this batch to complete
+          const batchResults = await Promise.all(batchPromises);
+          allFrameVariants.push(...batchResults);
+
+          console.log(`[UI] Batch complete: ${batchResults.length} frame(s) processed`);
         }
 
         console.log(`[UI] Total: ${allFrameVariants.length} frame(s) processed, ${allFrameVariants.reduce((sum, f) => sum + f.variants.length, 0)} total variants`);
@@ -1268,89 +1319,131 @@
 
         showProgress('Creating ZIP file...');
 
-        const zip = new JSZip();
         const totalFrames = frameExportData.length;
 
-        // Determine ZIP filename
+        // Group frames by their base name (everything before _v1, _v2, etc.)
+        // e.g., "00560_v1_ecomodern_rebrand" → "00560"
+        const frameGroups = {};
+
+        for (const frameData of frameExportData) {
+          // Extract base frame number (e.g., "00560" from "00560_v1_ecomodern_rebrand")
+          const match = frameData.folderName.match(/^(\d+)/);
+          const baseFrameName = match ? match[1] : frameData.folderName;
+
+          if (!frameGroups[baseFrameName]) {
+            frameGroups[baseFrameName] = [];
+          }
+          frameGroups[baseFrameName].push(frameData);
+        }
+
+        console.log(`[UI] Grouped ${totalFrames} frames into ${Object.keys(frameGroups).length} base frame(s)`);
+
+        // Create parent ZIP
+        const parentZip = new JSZip();
+        const baseFrameNames = Object.keys(frameGroups);
+
+        // Create a frame-level ZIP for each base frame
+        for (let groupIndex = 0; groupIndex < baseFrameNames.length; groupIndex++) {
+          const baseFrameName = baseFrameNames[groupIndex];
+          const variants = frameGroups[baseFrameName];
+
+          showProgress(`Creating ZIP for frame ${baseFrameName} (${variants.length} variant${variants.length > 1 ? 's' : ''})...`);
+          console.log(`[UI] Creating frame-level ZIP: ${baseFrameName}.zip with ${variants.length} variant(s)`);
+
+          // Create frame-level ZIP
+          const frameZip = new JSZip();
+
+          // Add each variant as a folder in the frame-level ZIP
+          for (let i = 0; i < variants.length; i++) {
+            const frameData = variants[i];
+
+            // Add meta.json with validation
+            const metaWithFormat = { ...frameData.meta, format: frameData.format };
+            let metaJson;
+            try {
+              metaJson = JSON.stringify(metaWithFormat, null, 2);
+              if (!metaJson || metaJson === '{}') {
+                throw new Error(`Failed to serialize metadata for ${frameData.folderName}`);
+              }
+            } catch (e) {
+              throw new Error(`Failed to create metadata file for ${frameData.folderName}: ` + e.message);
+            }
+
+            frameZip.file(`${frameData.folderName}/meta.json`, metaJson);
+
+            // Add all layer files (PNG or SVG)
+            const layersFolder = frameZip.folder(`${frameData.folderName}/layers`);
+            for (const layer of frameData.layers) {
+              layersFolder.file(layer.filename, layer.data, { base64: true });
+            }
+
+            // Add reconstructed image with correct extension
+            const reconstructedExt = frameData.format === 'svg' ? '.svg' : '.png';
+
+            // Validate reconstructed blob before adding
+            if (!frameData.reconstructedBlob) {
+              throw new Error(`Failed to create reconstructed image for ${frameData.folderName}`);
+            }
+
+            frameZip.file(
+              `${frameData.folderName}/${frameData.meta.component.name}_reconstructed${reconstructedExt}`,
+              frameData.reconstructedBlob
+            );
+
+            // Add AI prompt text file if available (from generated variants)
+            if (frameData.aiPromptTheme || frameData.aiPromptInstructions) {
+              let promptContent = '';
+
+              // Add theme description
+              if (frameData.aiPromptTheme) {
+                promptContent += frameData.aiPromptTheme + '\n\n';
+              }
+
+              // Add detailed instructions
+              if (frameData.aiPromptInstructions) {
+                promptContent += frameData.aiPromptInstructions;
+              }
+
+              frameZip.file(`${frameData.folderName}/prompt.txt`, promptContent.trim());
+            }
+
+            console.log(`[UI] Added variant to ${baseFrameName}.zip: ${frameData.folderName}`);
+          }
+
+          // Generate frame-level ZIP blob
+          const frameZipBlob = await frameZip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: {
+              level: 6
+            },
+            platform: 'UNIX'
+          });
+
+          // Add frame-level ZIP to parent ZIP
+          parentZip.file(`${baseFrameName}.zip`, frameZipBlob);
+          console.log(`[UI] Added ${baseFrameName}.zip to parent ZIP`);
+        }
+
+        // Determine parent ZIP filename
         let zipFilename;
-        if (totalFrames === 1) {
-          // Single frame: use frame name
-          zipFilename = `${frameExportData[0].folderName}.zip`;
+        if (baseFrameNames.length === 1) {
+          // Single base frame: just download the frame ZIP directly
+          zipFilename = `${baseFrameNames[0]}.zip`;
         } else {
-          // Multiple frames: use project name or "figma-export"
-          zipFilename = `figma-export-${totalFrames}-frames.zip`;
+          // Multiple base frames: create parent ZIP
+          zipFilename = `figma-export-${baseFrameNames.length}-frames.zip`;
         }
 
-        // Add each frame as a folder in the ZIP
-        for (let i = 0; i < frameExportData.length; i++) {
-          const frameData = frameExportData[i];
-          const frameInfo = totalFrames > 1 ? ` (${i + 1}/${totalFrames})` : '';
-
-          showProgress(`Adding frame ${i + 1} of ${totalFrames} to ZIP...`);
-
-          // Add meta.json with validation
-          const metaWithFormat = { ...frameData.meta, format: frameData.format };
-          let metaJson;
-          try {
-            metaJson = JSON.stringify(metaWithFormat, null, 2);
-            if (!metaJson || metaJson === '{}') {
-              throw new Error(`Failed to serialize metadata for frame ${i + 1}`);
-            }
-          } catch (e) {
-            throw new Error(`Failed to create metadata file for frame ${i + 1}: ` + e.message);
-          }
-
-          zip.file(`${frameData.folderName}/meta.json`, metaJson);
-
-          // Add all layer files (PNG or SVG)
-          const layersFolder = zip.folder(`${frameData.folderName}/layers`);
-          for (const layer of frameData.layers) {
-            layersFolder.file(layer.filename, layer.data, { base64: true });
-          }
-
-          // Add reconstructed image with correct extension
-          const reconstructedExt = frameData.format === 'svg' ? '.svg' : '.png';
-
-          // Validate reconstructed blob before adding
-          if (!frameData.reconstructedBlob) {
-            throw new Error(`Failed to create reconstructed image for frame ${i + 1}`);
-          }
-
-          zip.file(
-            `${frameData.folderName}/${frameData.meta.component.name}_reconstructed${reconstructedExt}`,
-            frameData.reconstructedBlob
-          );
-
-          // Add AI prompt text file if available (from generated variants)
-          if (frameData.aiPromptTheme || frameData.aiPromptInstructions) {
-            let promptContent = '';
-
-            // Add theme description
-            if (frameData.aiPromptTheme) {
-              promptContent += frameData.aiPromptTheme + '\n\n';
-            }
-
-            // Add detailed instructions
-            if (frameData.aiPromptInstructions) {
-              promptContent += frameData.aiPromptInstructions;
-            }
-
-            zip.file(`${frameData.folderName}/prompt.txt`, promptContent.trim());
-            console.log(`[UI] Added AI prompt to frame ${i + 1}`);
-          }
-
-          console.log(`[UI] Added frame ${i + 1}/${totalFrames} to ZIP: ${frameData.folderName}`);
-        }
-
-        // Generate ZIP with explicit options for cross-platform compatibility
+        // Generate final ZIP
         showProgress('Finalizing ZIP file...');
-        const blob = await zip.generateAsync({
+        const blob = await parentZip.generateAsync({
           type: 'blob',
           compression: 'DEFLATE',
           compressionOptions: {
             level: 6
           },
-          platform: 'UNIX' // Ensures consistent path separators
+          platform: 'UNIX'
         });
 
         // Validate ZIP blob
@@ -1366,7 +1459,7 @@
         a.click();
         URL.revokeObjectURL(url);
 
-        console.log(`[UI] Downloaded: ${zipFilename} (${totalFrames} frame${totalFrames > 1 ? 's' : ''})`);
+        console.log(`[UI] Downloaded: ${zipFilename} (${baseFrameNames.length} base frame${baseFrameNames.length > 1 ? 's' : ''}, ${totalFrames} total variants)`);
 
         // Clear stored data for next export
         frameExportData = [];
