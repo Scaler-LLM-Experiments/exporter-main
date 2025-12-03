@@ -1885,37 +1885,77 @@ function executeGenerateImage(
 // Generate Edits Orchestrator
 // ============================================
 
-// Helper to create a text label below a frame
+// Helper to create a styled label card below a frame
 async function createPromptLabel(
   frame: FrameNode | ComponentNode,
   promptText: string,
   theme: string
-): Promise<void> {
+): Promise<number> {
   try {
-    const textNode = figma.createText();
-
-    // Load a default font
+    // Load fonts
+    await figma.loadFontAsync({ family: 'Inter', style: 'Bold' });
     await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
 
-    // Position below the frame with some padding
-    textNode.x = frame.x;
-    textNode.y = frame.y + frame.height + 20;
+    // Create a container frame for the label
+    const labelFrame = figma.createFrame();
+    labelFrame.name = `${frame.name}_prompt_card`;
 
-    // Set text content: theme name + prompt
-    textNode.characters = `${theme}: ${promptText}`;
+    // Position below the frame with 24px gap
+    labelFrame.x = frame.x;
+    labelFrame.y = frame.y + frame.height + 24;
 
-    // Style the text
-    textNode.fontSize = 14;
-    textNode.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    // Set up auto-layout for padding
+    labelFrame.layoutMode = 'VERTICAL';
+    labelFrame.primaryAxisSizingMode = 'AUTO';
+    labelFrame.counterAxisSizingMode = 'FIXED';
+    labelFrame.resize(frame.width, 100); // Width matches frame, height auto
+    labelFrame.paddingTop = 20;
+    labelFrame.paddingBottom = 20;
+    labelFrame.paddingLeft = 24;
+    labelFrame.paddingRight = 24;
+    labelFrame.itemSpacing = 12;
 
-    // Constrain width to match frame
-    textNode.resize(frame.width, textNode.height);
-    textNode.textAutoResize = 'HEIGHT';
+    // White background
+    labelFrame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
 
-    // Name the text node
-    textNode.name = `${frame.name}_prompt`;
+    // Border (stroke)
+    labelFrame.strokes = [{ type: 'SOLID', color: { r: 0.85, g: 0.85, b: 0.85 } }];
+    labelFrame.strokeWeight = 1;
+
+    // Rounded corners
+    labelFrame.cornerRadius = 12;
+
+    // Create theme title
+    const themeText = figma.createText();
+    themeText.characters = theme;
+    themeText.fontSize = 20;
+    themeText.fontName = { family: 'Inter', style: 'Bold' };
+    themeText.fills = [{ type: 'SOLID', color: { r: 0.1, g: 0.1, b: 0.1 } }];
+    themeText.layoutAlign = 'STRETCH';
+    themeText.textAutoResize = 'HEIGHT';
+
+    // Create prompt description
+    const promptTextNode = figma.createText();
+    promptTextNode.characters = promptText;
+    promptTextNode.fontSize = 16;
+    promptTextNode.fontName = { family: 'Inter', style: 'Regular' };
+    promptTextNode.fills = [{ type: 'SOLID', color: { r: 0.4, g: 0.4, b: 0.4 } }];
+    promptTextNode.layoutAlign = 'STRETCH';
+    promptTextNode.textAutoResize = 'HEIGHT';
+
+    // Set line height for readability
+    promptTextNode.lineHeight = { value: 150, unit: 'PERCENT' };
+
+    // Add text nodes to frame
+    labelFrame.appendChild(themeText);
+    labelFrame.appendChild(promptTextNode);
+
+    // Return the height of the label card for spacing calculations
+    // Need to wait a tick for auto-layout to calculate
+    return labelFrame.height;
   } catch (error) {
     console.warn('Could not create prompt label:', error);
+    return 0;
   }
 }
 
@@ -1931,6 +1971,13 @@ async function applyEditVariants(
     message: 'Creating frame variants with AI-generated edits...'
   });
 
+  // Spacing configuration
+  const VERTICAL_SPACING = 500; // 500px between variants (excluding prompt card)
+  const PROMPT_CARD_GAP = 24; // Gap between frame and its prompt card
+
+  // Track cumulative Y position for vertical stacking
+  let currentY = originalFrame.y + originalFrame.height + VERTICAL_SPACING;
+
   // Create duplicates and apply different edits to each
   for (let i = 0; i < variants.length; i++) {
     const variant = variants[i];
@@ -1944,7 +1991,10 @@ async function applyEditVariants(
     const clone = originalFrame.clone();
     const themeSlug = variant.theme.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     clone.name = `${originalName}_v${i + 1}_${themeSlug}`;
-    clone.x = originalFrame.x + (originalFrame.width + 50) * (i + 1);
+
+    // Position vertically (same X as original, stacked below)
+    clone.x = originalFrame.x;
+    clone.y = currentY;
 
     // Apply all instructions for this variant
     let successCount = 0;
@@ -1962,8 +2012,11 @@ async function applyEditVariants(
 
     console.log(`[Plugin] Variant ${i + 1} (${variant.theme}): Applied ${successCount}/${variant.instructions.length} edits`);
 
-    // Create text label below the variant frame with the prompt
-    await createPromptLabel(clone, variant.humanPrompt, variant.theme);
+    // Create styled prompt label card below the variant frame
+    const labelHeight = await createPromptLabel(clone, variant.humanPrompt, variant.theme);
+
+    // Calculate next Y position: frame height + gap + label height + vertical spacing
+    currentY = clone.y + clone.height + PROMPT_CARD_GAP + labelHeight + VERTICAL_SPACING;
 
     figma.notify(`Variant ${i + 1}: ${variant.theme} (${successCount} edits)`, { timeout: 1500 });
   }

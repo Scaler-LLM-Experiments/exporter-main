@@ -54,7 +54,7 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS = {
   FAST: process.env.OPENROUTER_MODEL_FAST || 'google/gemini-2.5-flash',           // For rename-layers
   PRO: process.env.OPENROUTER_MODEL_PRO || 'google/gemini-3-pro-preview',         // For generate-edits
-  IMAGE: process.env.OPENROUTER_MODEL_IMAGE || 'google/gemini-3-pro-image-preview' // For image generation
+  IMAGE: process.env.OPENROUTER_MODEL_IMAGE || 'google/gemini-2.5-flash-image-preview' // For image generation
 };
 
 interface OpenRouterMessage {
@@ -71,10 +71,18 @@ interface OpenRouterRequest {
   include_reasoning?: boolean;
 }
 
+interface OpenRouterImageData {
+  type: string;
+  image_url: {
+    url: string;
+  };
+}
+
 interface OpenRouterResponse {
   choices?: Array<{
     message?: {
       content?: string;
+      images?: OpenRouterImageData[];  // For image generation responses
     };
     delta?: {
       content?: string;
@@ -307,23 +315,31 @@ async function generateImageFromPrompt(
   try {
     console.log(`  Generating image: "${imagePrompt.substring(0, 50)}..."`);
 
-    const response = await callOpenRouter({
+    // Build the request with modalities for image generation
+    const requestBody = {
       model: OPENROUTER_MODELS.IMAGE,
       messages: [{
         role: 'user',
-        content: `You are generating an image for a design variation.
+        content: `${imagePrompt}
 
 Context: ${contextDescription}
 
-Generate this image:
-${imagePrompt}
-
-Create a high-quality, professional image that fits the described context and aesthetic.`
+Generate a high-quality, professional image that fits the described context and aesthetic.`
       }],
-      // @ts-expect-error - modalities is a new feature for image generation
       modalities: ['image', 'text'],
       temperature: 0.8,
       max_tokens: 4096
+    };
+
+    const response = await fetch(OPENROUTER_BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://figma-exporter-plugin.local',
+        'X-Title': 'Figma Exporter AI'
+      },
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
@@ -333,30 +349,40 @@ Create a high-quality, professional image that fits the described context and ae
     }
 
     const data = await response.json() as OpenRouterResponse;
-    const content = data.choices?.[0]?.message?.content;
 
-    // The image should be returned as a data URL in the content
+    // Check for images array in the response (OpenRouter image generation format)
+    const images = data.choices?.[0]?.message?.images;
+    if (images && images.length > 0) {
+      const imageUrl = images[0].image_url?.url;
+      if (imageUrl && imageUrl.startsWith('data:image')) {
+        // Extract base64 from data URL
+        const base64Match = imageUrl.match(/base64,(.+)/);
+        if (base64Match) {
+          console.log('  Image generated successfully');
+          return base64Match[1];
+        }
+      }
+    }
+
+    // Fallback: Check content for image data (alternative format)
+    const content = data.choices?.[0]?.message?.content;
     if (content && typeof content === 'string' && content.startsWith('data:image')) {
-      // Extract base64 from data URL
       const base64Match = content.match(/base64,(.+)/);
       if (base64Match) {
-        console.log('  Image generated successfully');
+        console.log('  Image generated successfully (from content)');
         return base64Match[1];
       }
     }
 
-    // Check if content is an array with image data
-    if (Array.isArray(content)) {
-      for (const part of content) {
-        if (part.type === 'image_url' && part.image_url?.url) {
-          const base64Match = part.image_url.url.match(/base64,(.+)/);
-          if (base64Match) {
-            console.log('  Image generated successfully');
-            return base64Match[1];
-          }
-        }
-      }
-    }
+    // Log the response structure for debugging
+    console.log('  Response structure:', JSON.stringify({
+      hasChoices: !!data.choices,
+      hasMessage: !!data.choices?.[0]?.message,
+      hasImages: !!data.choices?.[0]?.message?.images,
+      imagesLength: data.choices?.[0]?.message?.images?.length,
+      contentType: typeof content,
+      contentPreview: typeof content === 'string' ? content.substring(0, 100) : 'non-string'
+    }));
 
     console.log('  No image data found in response');
     return null;
