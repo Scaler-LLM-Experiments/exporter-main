@@ -41,9 +41,19 @@ interface MetaData {
   format?: string;
 }
 
-// Helper to create filename from layer ID
-function createFilename(id: string): string {
-  return id.replace(/:/g, '_') + '.png';
+// Helper to create filename from layer name (matching code.ts logic)
+function createFilename(name: string, id: string): string {
+  // Sanitize the layer name: remove/replace invalid filename characters
+  const safeName = name
+    .replace(/[<>:"/\\|?*]/g, '_')  // Replace invalid filename chars
+    .replace(/\s+/g, '_')            // Replace spaces with underscores
+    .replace(/_+/g, '_')             // Collapse multiple underscores
+    .replace(/^_|_$/g, '')           // Trim leading/trailing underscores
+    .substring(0, 100);              // Limit length
+
+  // Use sanitized name, fallback to ID if name is empty
+  const baseName = safeName || id.replace(/:/g, '_');
+  return `${baseName}.png`;
 }
 
 async function reconstructImage(folderPath: string, outputPath?: string): Promise<void> {
@@ -91,7 +101,7 @@ async function reconstructImage(folderPath: string, outputPath?: string): Promis
   const compositeOps: sharp.OverlayOptions[] = [];
 
   for (const layer of sortedLayers) {
-    const layerImagePath = path.join(folderPath, 'layers', createFilename(layer.id));
+    const layerImagePath = path.join(folderPath, 'layers', createFilename(layer.name, layer.id));
 
     if (!fs.existsSync(layerImagePath)) {
       console.warn(`⚠️  Layer image not found: ${layerImagePath} (${layer.name})`);
