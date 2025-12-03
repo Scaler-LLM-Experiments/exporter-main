@@ -363,6 +363,47 @@
     font-size: 0.6875rem;
     color: hsl(var(--muted-foreground));
   }
+
+  /* Select/Dropdown Styles */
+  .select-container {
+    margin-bottom: 0.5rem;
+  }
+
+  .select-container label {
+    display: block;
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground));
+    margin-bottom: 0.375rem;
+    font-weight: 500;
+  }
+
+  select {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+
+  select:hover {
+    border-color: hsl(var(--foreground) / 0.3);
+  }
+
+  select:focus {
+    outline: none;
+    border-color: hsl(var(--foreground));
+    box-shadow: 0 0 0 2px hsl(var(--foreground) / 0.1);
+  }
+
+  select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 </style>
 
 <h2>Exporter</h2>
@@ -419,6 +460,12 @@
   <label for="generate-images">Generate AI Images</label>
   <span class="checkbox-hint">Requires OpenRouter</span>
 </div>
+<div class="select-container">
+  <label for="prompt-selector">AI Prompt Style</label>
+  <select id="prompt-selector">
+    <option value="">Loading prompts...</option>
+  </select>
+</div>
 <button id="generate-edits">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -455,9 +502,22 @@
   const frameNameEl = document.getElementById('frame-name');
   const checkmarks = document.querySelectorAll('.checkmark');
   const progressStatus = document.getElementById('progress-status');
+  const promptSelector = document.getElementById('prompt-selector');
 
   // Backend server URL
-  const BACKEND_URL = 'http://localhost:3000';
+  // IMPORTANT: Update this to your Railway URL after deployment!
+  // Format: https://your-app-name.up.railway.app
+  const BACKEND_URL = 'http://localhost:3000'; // Change to Railway URL for production
+  console.log('[UI] Backend URL:', BACKEND_URL);
+
+  // Store user email (captured from plugin messages)
+  let currentUserEmail = 'unknown@figma.local';
+
+  // Store selected prompt file
+  let selectedPromptFile = 'default.txt';
+
+  // Store multiple frame exports (for single ZIP with folders)
+  let frameExportData = [];
 
   // Helper to create filename from layer name (matching code.ts logic)
   function createFilename(name, id, ext = 'png') {
@@ -534,6 +594,7 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        userEmail: currentUserEmail, // Add user email
         layers: layers
           .filter(l => l.imageData) // Only send layers with image data
           .map(l => ({
@@ -558,11 +619,13 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        userEmail: currentUserEmail, // Add user email
         frameName,
         frameWidth,
         frameHeight,
         frameImageBase64,  // Include frame image for AI vision analysis
         generateImages,    // Whether to generate AI images for image layers
+        promptFile: selectedPromptFile, // User-selected prompt style
         layers: layers.map(l => ({
           name: l.name,
           type: l.type,
@@ -588,6 +651,56 @@
 
     return response.json();
   }
+
+  // ============================================
+  // Fetch and Populate Prompts
+  // ============================================
+  async function loadPrompts() {
+    try {
+      console.log('[UI] Fetching available prompts...');
+      const response = await fetch(`${BACKEND_URL}/api/prompts`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch prompts');
+      }
+
+      const data = await response.json();
+      const prompts = data.prompts || [];
+
+      console.log(`[UI] Loaded ${prompts.length} prompts:`, prompts);
+
+      // Clear existing options
+      promptSelector.innerHTML = '';
+
+      // Populate dropdown
+      prompts.forEach(prompt => {
+        const option = document.createElement('option');
+        option.value = prompt.filename;
+        option.textContent = prompt.name;
+        if (prompt.isDefault) {
+          option.selected = true;
+          selectedPromptFile = prompt.filename;
+        }
+        promptSelector.appendChild(option);
+      });
+
+      console.log(`[UI] Selected prompt: ${selectedPromptFile}`);
+    } catch (error) {
+      console.error('[UI] Error loading prompts:', error);
+      // Fallback to default
+      promptSelector.innerHTML = '<option value="default.txt">Default</option>';
+      selectedPromptFile = 'default.txt';
+    }
+  }
+
+  // Update selected prompt when user changes selection
+  promptSelector.addEventListener('change', (e) => {
+    selectedPromptFile = e.target.value;
+    console.log(`[UI] Prompt changed to: ${selectedPromptFile}`);
+  });
+
+  // Load prompts on page load
+  loadPrompts();
 
   // ============================================
   // Break Groups Apart Flow
@@ -677,6 +790,9 @@
   exportBtn.onclick = () => {
     console.log('Export button clicked');
     try {
+      // Clear any previous export data
+      frameExportData = [];
+
       setButtonState(exportBtn, 'loading', 'Exporting...');
       showProgress('Exporting frame...');
 
@@ -731,6 +847,12 @@
     // AI Rename Flow - Process layers through AI
     // ============================================
     if (msg.type === 'layers-for-renaming') {
+      // Capture user email
+      if (msg.userEmail) {
+        currentUserEmail = msg.userEmail;
+        console.log('[UI] User email captured:', currentUserEmail);
+      }
+
       console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
       console.log('[UI] Layer IDs:', msg.layers.map(l => l.id));
       try {
@@ -799,6 +921,12 @@
     // Generate Edits Flow - Receive metadata and call AI
     // ============================================
     if (msg.type === 'metadata-for-edits') {
+      // Capture user email
+      if (msg.userEmail) {
+        currentUserEmail = msg.userEmail;
+        console.log('[UI] User email captured:', currentUserEmail);
+      }
+
       console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
       console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
       try {
@@ -870,6 +998,8 @@
         const frameInfo = msg.totalFrames > 1
           ? ` (${msg.frameIndex + 1}/${msg.totalFrames})`
           : '';
+
+        showProgress(`Processing frame ${msg.frameIndex + 1} of ${msg.totalFrames}...`);
 
         let reconstructedBlob;
         const exportFormat = msg.format || 'png';
@@ -983,44 +1113,103 @@
           });
         }
 
-        // Removed status updates
+        // Store export data for this frame
+        frameExportData.push({
+          folderName: msg.folderName,
+          meta: msg.meta,
+          layers: msg.layers,
+          reconstructedBlob,
+          format: exportFormat,
+          frameIndex: msg.frameIndex,
+          totalFrames: msg.totalFrames
+        });
+
+        console.log(`[UI] Collected frame ${msg.frameIndex + 1}/${msg.totalFrames}: ${msg.folderName}`);
+
+        // If this is the last frame OR single frame, process immediately
+        if (msg.frameIndex + 1 === msg.totalFrames) {
+          // Don't process here - wait for 'all-exports-complete' message
+          console.log(`[UI] All ${msg.totalFrames} frames collected, waiting for completion signal...`);
+        }
+
+      } catch (error) {
+        console.error('Error creating ZIP:', error);
+        alert('Export failed: ' + error.message);
+        setButtonState(exportBtn, 'default');
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+      }
+    }
+
+    // ============================================
+    // All Exports Complete
+    // ============================================
+    if (msg.type === 'all-exports-complete') {
+      try {
+        if (frameExportData.length === 0) {
+          throw new Error('No frame data to export');
+        }
+
+        showProgress('Creating ZIP file...');
 
         const zip = new JSZip();
-        const folderName = msg.folderName;
+        const totalFrames = frameExportData.length;
 
-        // Add meta.json with validation
-        const metaWithFormat = { ...msg.meta, format: exportFormat };
+        // Determine ZIP filename
+        let zipFilename;
+        if (totalFrames === 1) {
+          // Single frame: use frame name
+          zipFilename = `${frameExportData[0].folderName}.zip`;
+        } else {
+          // Multiple frames: use project name or "figma-export"
+          zipFilename = `figma-export-${totalFrames}-frames.zip`;
+        }
 
-        // Validate JSON serialization
-        let metaJson;
-        try {
-          metaJson = JSON.stringify(metaWithFormat, null, 2);
-          if (!metaJson || metaJson === '{}') {
-            throw new Error('Failed to serialize metadata');
+        // Add each frame as a folder in the ZIP
+        for (let i = 0; i < frameExportData.length; i++) {
+          const frameData = frameExportData[i];
+          const frameInfo = totalFrames > 1 ? ` (${i + 1}/${totalFrames})` : '';
+
+          showProgress(`Adding frame ${i + 1} of ${totalFrames} to ZIP...`);
+
+          // Add meta.json with validation
+          const metaWithFormat = { ...frameData.meta, format: frameData.format };
+          let metaJson;
+          try {
+            metaJson = JSON.stringify(metaWithFormat, null, 2);
+            if (!metaJson || metaJson === '{}') {
+              throw new Error(`Failed to serialize metadata for frame ${i + 1}`);
+            }
+          } catch (e) {
+            throw new Error(`Failed to create metadata file for frame ${i + 1}: ` + e.message);
           }
-        } catch (e) {
-          throw new Error('Failed to create metadata file: ' + e.message);
+
+          zip.file(`${frameData.folderName}/meta.json`, metaJson);
+
+          // Add all layer files (PNG or SVG)
+          const layersFolder = zip.folder(`${frameData.folderName}/layers`);
+          for (const layer of frameData.layers) {
+            layersFolder.file(layer.filename, layer.data, { base64: true });
+          }
+
+          // Add reconstructed image with correct extension
+          const reconstructedExt = frameData.format === 'svg' ? '.svg' : '.png';
+
+          // Validate reconstructed blob before adding
+          if (!frameData.reconstructedBlob) {
+            throw new Error(`Failed to create reconstructed image for frame ${i + 1}`);
+          }
+
+          zip.file(
+            `${frameData.folderName}/${frameData.meta.component.name}_reconstructed${reconstructedExt}`,
+            frameData.reconstructedBlob
+          );
+
+          console.log(`[UI] Added frame ${i + 1}/${totalFrames} to ZIP: ${frameData.folderName}`);
         }
-
-        zip.file(`${folderName}/meta.json`, metaJson);
-
-        // Add all layer files (PNG or SVG)
-        const layersFolder = zip.folder(`${folderName}/layers`);
-        for (const layer of msg.layers) {
-          layersFolder.file(layer.filename, layer.data, { base64: true });
-        }
-
-        // Add reconstructed image with correct extension
-        const reconstructedExt = exportFormat === 'svg' ? '.svg' : '.png';
-
-        // Validate reconstructed blob before adding
-        if (!reconstructedBlob) {
-          throw new Error('Failed to create reconstructed image');
-        }
-
-        zip.file(`${folderName}/${msg.meta.component.name}_reconstructed${reconstructedExt}`, reconstructedBlob);
 
         // Generate ZIP with explicit options for cross-platform compatibility
+        showProgress('Finalizing ZIP file...');
         const blob = await zip.generateAsync({
           type: 'blob',
           compression: 'DEFLATE',
@@ -1039,27 +1228,28 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${folderName}.zip`;
+        a.download = zipFilename;
         a.click();
         URL.revokeObjectURL(url);
 
+        console.log(`[UI] Downloaded: ${zipFilename} (${totalFrames} frame${totalFrames > 1 ? 's' : ''})`);
+
+        // Clear stored data for next export
+        frameExportData = [];
+
+        // Show success state in all buttons (whichever was active)
+        setButtonState(exportBtn, 'success');
+        setButtonState(aiRenameBtn, 'success');
+        hideProgress();
+
       } catch (error) {
-        console.error('Error creating ZIP:', error);
+        console.error('Error creating final ZIP:', error);
         alert('Export failed: ' + error.message);
         setButtonState(exportBtn, 'default');
         setButtonState(aiRenameBtn, 'default');
         hideProgress();
+        frameExportData = []; // Clear on error
       }
-    }
-
-    // ============================================
-    // All Exports Complete
-    // ============================================
-    if (msg.type === 'all-exports-complete') {
-      // Show success state in all buttons (whichever was active)
-      setButtonState(exportBtn, 'success');
-      setButtonState(aiRenameBtn, 'success');
-      hideProgress();
     }
 
     // ============================================

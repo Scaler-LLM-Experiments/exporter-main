@@ -1,9 +1,13 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import timeout from 'connect-timeout';
+import { renameLimiter, imageLimiter, processWithConcurrency } from './lib/concurrency';
+import { apiLimiter, heavyLimiter, renameRateLimiter } from './lib/rateLimiter';
+import { query as dbQuery } from './lib/db';
 
 dotenv.config();
 
@@ -18,6 +22,42 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '100mb' }));
+
+// ============================================
+// Timeouts and Monitoring
+// ============================================
+
+// Request timeout: 10 minutes for heavy operations
+app.use(timeout('600s'));
+
+// Middleware to check if request has timed out
+function haltOnTimedout(req: Request, res: Response, next: NextFunction) {
+  if (!req.timedout) next();
+}
+
+app.use(haltOnTimedout);
+
+// Memory monitoring middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const memUsage = process.memoryUsage();
+  const memMB = {
+    rss: Math.round(memUsage.rss / 1024 / 1024),
+    heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+    heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024)
+  };
+
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} | Memory: ${memMB.heapUsed}/${memMB.heapTotal}MB heap, ${memMB.rss}MB RSS`);
+
+  // Warn if memory usage is high
+  if (memMB.heapUsed > 400) {
+    console.warn(`⚠️  High memory usage: ${memMB.heapUsed}MB`);
+  }
+
+  next();
+});
+
+// Apply general API rate limiting to all routes
+app.use('/api/', apiLimiter);
 
 // ============================================
 // Provider Configuration
@@ -112,6 +152,7 @@ interface LayerInput {
 }
 
 interface RenameRequest {
+  userEmail?: string; // User email (optional for backward compatibility)
   layers: LayerInput[];
 }
 
@@ -143,12 +184,14 @@ interface LayerMetadata {
 }
 
 interface GenerateEditsRequest {
+  userEmail?: string; // User email (optional for backward compatibility)
   frameName: string;
   frameWidth: number;
   frameHeight: number;
   frameImageBase64?: string;  // Frame image for AI vision analysis
   layers: LayerMetadata[];
   generateImages?: boolean;   // Whether to generate AI images for image layers
+  promptFile?: string; // User-selected prompt file (e.g., 'creative-director.txt')
 }
 
 interface EditInstruction {
@@ -444,24 +487,70 @@ Generate a high-quality, professional image that fits the described context and 
   }
 }
 
-// Process image generation instructions in variants
+// Process image generation instructions in variants (with parallel processing)
 async function processImageGenerations(
   variants: EditVariant[],
   contextDescription: string
 ): Promise<EditVariant[]> {
-  for (const variant of variants) {
-    for (const instruction of variant.instructions) {
-      if (instruction.action === 'generateImage' && instruction.imagePrompt) {
-        const generatedImage = await generateImageFromPrompt(
-          instruction.imagePrompt,
-          `${contextDescription} - Variant: ${variant.theme}`
-        );
-        if (generatedImage) {
-          instruction.generatedImageBase64 = generatedImage;
-        }
-      }
-    }
+  // Collect all image generation instructions with their references
+  interface ImageTask {
+    variantIndex: number;
+    instructionIndex: number;
+    instruction: EditInstruction;
+    variant: EditVariant;
   }
+
+  const imageTasks: ImageTask[] = [];
+  variants.forEach((variant, variantIndex) => {
+    variant.instructions.forEach((instruction, instructionIndex) => {
+      if (instruction.action === 'generateImage' && instruction.imagePrompt) {
+        imageTasks.push({ variantIndex, instructionIndex, instruction, variant });
+      }
+    });
+  });
+
+  if (imageTasks.length === 0) {
+    return variants;
+  }
+
+  console.log(`Processing ${imageTasks.length} image generation tasks in parallel (concurrency limit: 5)...`);
+
+  // Process all image generation tasks in parallel
+  const settledResults = await processWithConcurrency(
+    imageTasks,
+    async (task: ImageTask, index: number) => {
+      console.log(`  [${index + 1}/${imageTasks.length}] Generating image for "${task.instruction.imagePrompt?.substring(0, 50)}..."`);
+
+      const generatedImage = await generateImageFromPrompt(
+        task.instruction.imagePrompt!,
+        `${contextDescription} - Variant: ${task.variant.theme}`
+      );
+
+      if (generatedImage) {
+        console.log(`    ✓ Image generated successfully`);
+      } else {
+        console.log(`    ✗ Image generation failed`);
+      }
+
+      return {
+        ...task,
+        generatedImage
+      };
+    },
+    imageLimiter
+  );
+
+  // Apply results back to instructions
+  settledResults.forEach((result: PromiseSettledResult<ImageTask & { generatedImage: string | null }>, index: number) => {
+    if (result.status === 'fulfilled' && result.value.generatedImage) {
+      const task = result.value;
+      variants[task.variantIndex].instructions[task.instructionIndex].generatedImageBase64 = result.value.generatedImage;
+    } else if (result.status === 'rejected') {
+      const task = imageTasks[index];
+      console.error(`  Failed to generate image for variant ${task.variant.theme}: ${result.reason}`);
+    }
+  });
+
   return variants;
 }
 
@@ -711,50 +800,159 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'exporter-server' });
 });
 
-// Main endpoint for renaming layers
-app.post('/api/rename-layers', async (req: Request, res: Response) => {
+// Get available prompts endpoint
+app.get('/api/prompts', (_req: Request, res: Response) => {
   try {
-    const { layers }: RenameRequest = req.body;
+    // Try compiled location first, then dev location
+    let promptsDir = path.join(__dirname, 'prompts');
+    if (!fs.existsSync(promptsDir)) {
+      promptsDir = path.join(__dirname, '..', 'prompts');
+    }
+
+    if (!fs.existsSync(promptsDir)) {
+      res.status(500).json({
+        error: 'Prompts directory not found',
+        message: 'Could not locate prompts directory'
+      });
+      return;
+    }
+
+    // Read all .txt files from prompts directory
+    const files = fs.readdirSync(promptsDir)
+      .filter(file => file.endsWith('.txt'))
+      .sort();
+
+    // Format prompt list
+    const prompts = files.map(filename => {
+      const id = filename.replace('.txt', '');
+      // Convert kebab-case or snake_case to Title Case
+      const name = id
+        .split(/[-_]/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      return {
+        id,
+        name,
+        filename,
+        isDefault: filename === 'default.txt'
+      };
+    });
+
+    console.log(`Found ${prompts.length} prompt files in ${promptsDir}`);
+    res.json({ prompts });
+  } catch (error) {
+    console.error('Error reading prompts:', error);
+    res.status(500).json({
+      error: 'Failed to read prompts',
+      message: (error as Error).message
+    });
+  }
+});
+
+// Main endpoint for renaming layers
+app.post('/api/rename-layers', renameRateLimiter, haltOnTimedout, async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  let jobId: string | null = null;
+
+  try {
+    const { layers, userEmail }: RenameRequest = req.body;
 
     if (!layers || !Array.isArray(layers)) {
       res.status(400).json({ error: 'Invalid request: layers array required' });
       return;
     }
 
-    console.log(`Processing ${layers.length} layers for AI renaming...`);
+    // Get IP address
+    const ipAddress = req.ip || req.socket.remoteAddress || null;
 
+    // Create job in database
+    const jobResult = await dbQuery(
+      `INSERT INTO jobs (type, status, layer_count, user_email, ip_address)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      ['rename-layers', 'processing', layers.length, userEmail || null, ipAddress]
+    );
+    jobId = jobResult.rows[0]?.id || null;
+
+    console.log(`[Job ${jobId}] Processing ${layers.length} layers for AI renaming (parallel with concurrency limit of 10)...`);
+    console.log(`[Job ${jobId}] User: ${userEmail || 'unknown'}`);
+
+    // Process layers in parallel with concurrency control
+    const settledResults = await processWithConcurrency(
+      layers,
+      async (layer: LayerInput, index: number) => {
+        console.log(`  [${index + 1}/${layers.length}] Processing: ${layer.currentName} (${layer.type})`);
+
+        const newName = await generateLayerName(
+          layer.imageBase64,
+          layer.currentName,
+          layer.type
+        );
+
+        console.log(`    -> ${newName}`);
+
+        return {
+          id: layer.id,
+          newName
+        };
+      },
+      renameLimiter
+    );
+
+    // Extract successful results and handle failures
     const results: RenameResponse['layers'] = [];
+    const failures: string[] = [];
 
-    // Process layers sequentially to avoid rate limiting
-    for (let i = 0; i < layers.length; i++) {
-      const layer = layers[i];
-      console.log(`  [${i + 1}/${layers.length}] Processing: ${layer.currentName} (${layer.type})`);
-
-      const newName = await generateLayerName(
-        layer.imageBase64,
-        layer.currentName,
-        layer.type
-      );
-
-      results.push({
-        id: layer.id,
-        newName
-      });
-
-      console.log(`    -> ${newName}`);
-
-      // Small delay between requests to avoid rate limiting
-      if (i < layers.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+    settledResults.forEach((result: PromiseSettledResult<{ id: string; newName: string }>, index: number) => {
+      if (result.status === 'fulfilled') {
+        results.push(result.value);
+      } else {
+        const layer = layers[index];
+        console.error(`  [${index + 1}/${layers.length}] Failed: ${layer.currentName} - ${result.reason}`);
+        failures.push(layer.id);
+        // Use fallback name on failure
+        results.push({
+          id: layer.id,
+          newName: layer.currentName
+        });
       }
+    });
+
+    const duration = Date.now() - startTime;
+    const status = failures.length === layers.length ? 'failed' : 'completed';
+
+    // Update job as completed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2
+         WHERE id = $3`,
+        [status, duration, jobId]
+      );
     }
 
-    console.log(`Completed renaming ${results.length} layers`);
+    console.log(`[Job ${jobId}] Completed renaming: ${results.length} total, ${failures.length} failed, ${duration}ms`);
+    if (failures.length > 0) {
+      console.log(`Failed layer IDs: ${failures.join(', ')}`);
+    }
     console.log('Sending response:', JSON.stringify({ layers: results }, null, 2));
 
     res.json({ layers: results });
   } catch (error) {
-    console.error('Error in /api/rename-layers:', error);
+    const duration = Date.now() - startTime;
+    console.error(`[Job ${jobId}] Error in /api/rename-layers:`, error);
+
+    // Update job as failed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2, error_message = $3, error_stack = $4
+         WHERE id = $5`,
+        ['failed', duration, (error as Error).message, (error as Error).stack || null, jobId]
+      );
+    }
+
     res.status(500).json({
       error: 'Internal server error',
       message: (error as Error).message
@@ -765,41 +963,61 @@ app.post('/api/rename-layers', async (req: Request, res: Response) => {
 // ============================================
 // Generate Edits Endpoint
 // ============================================
-app.post('/api/generate-edits', async (req: Request, res: Response) => {
+app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  let jobId: string | null = null;
+
   try {
-    const { frameName, frameWidth, frameHeight, frameImageBase64, layers, generateImages }: GenerateEditsRequest = req.body;
+    const { frameName, frameWidth, frameHeight, frameImageBase64, layers, generateImages, promptFile, userEmail }: GenerateEditsRequest = req.body;
 
     if (!layers || !Array.isArray(layers) || layers.length === 0) {
       res.status(400).json({ error: 'Invalid request: layers array required' });
       return;
     }
 
+    // Get IP address
+    const ipAddress = req.ip || req.socket.remoteAddress || null;
+
+    // Create job in database (5 variants expected)
+    const jobResult = await dbQuery(
+      `INSERT INTO jobs (type, status, frame_name, variant_count, user_email, ip_address)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id`,
+      ['generate-edits', 'processing', frameName, 5, userEmail || null, ipAddress]
+    );
+    jobId = jobResult.rows[0]?.id || null;
+
     // Count image layers
     const imageLayers = layers.filter(l => l.hasImageFill);
 
     console.log(`\n========================================`);
-    console.log(`Generating edits for frame "${frameName}"`);
+    console.log(`[Job ${jobId}] Generating edits for frame "${frameName}"`);
     console.log(`Frame size: ${frameWidth} x ${frameHeight}`);
     console.log(`Layers: ${layers.length} (${imageLayers.length} with images)`);
     console.log(`Image included: ${frameImageBase64 ? `Yes (${Math.round(frameImageBase64.length / 1024)}KB)` : 'No'}`);
     console.log(`Generate AI Images: ${generateImages ? 'YES' : 'No'}`);
+    console.log(`Prompt file: ${promptFile || 'default.txt'}`);
+    console.log(`User: ${userEmail || 'unknown'}`);
     console.log(`========================================\n`);
 
-    // Load the appropriate prompt based on whether image generation is enabled
+    // Load the user-selected prompt file
     let activePrompt = EDIT_GENERATION_PROMPT;
-    if (generateImages && AI_PROVIDER === 'openrouter') {
-      const imagePromptPath = path.join(__dirname, 'prompts', 'creative-director-with-images.txt');
-      const devImagePromptPath = path.join(__dirname, '..', 'prompts', 'creative-director-with-images.txt');
+    const selectedPromptFile = promptFile || 'default.txt';
+
+    // Try loading the selected prompt file
+    const promptPath = path.join(__dirname, 'prompts', selectedPromptFile);
+    const devPromptPath = path.join(__dirname, '..', 'prompts', selectedPromptFile);
+
+    try {
+      activePrompt = fs.readFileSync(promptPath, 'utf-8');
+      console.log(`Using prompt: ${selectedPromptFile}`);
+    } catch {
       try {
-        activePrompt = fs.readFileSync(imagePromptPath, 'utf-8');
-        console.log('Using image-enabled prompt: creative-director-with-images.txt');
+        activePrompt = fs.readFileSync(devPromptPath, 'utf-8');
+        console.log(`Using prompt (dev): ${selectedPromptFile}`);
       } catch {
-        try {
-          activePrompt = fs.readFileSync(devImagePromptPath, 'utf-8');
-          console.log('Using image-enabled prompt (dev): creative-director-with-images.txt');
-        } catch {
-          console.log('Image prompt not found, using default prompt');
-        }
+        console.log(`Prompt file not found: ${selectedPromptFile}, using default`);
+        // activePrompt already set to EDIT_GENERATION_PROMPT
       }
     }
 
@@ -991,15 +1209,39 @@ app.post('/api/generate-edits', async (req: Request, res: Response) => {
     // Generate human-readable instructions for each variant
     variants = await addReadableInstructions(variants);
 
-    console.log(`Generated ${variants.length} variants:`);
+    const duration = Date.now() - startTime;
+
+    console.log(`[Job ${jobId}] Generated ${variants.length} variants in ${duration}ms:`);
     variants.forEach((v, i) => {
       console.log(`  ${i + 1}. ${v.theme}: ${v.instructions.length} instructions`);
       console.log(`     "${v.humanPrompt}"`);
     });
 
+    // Update job as completed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2
+         WHERE id = $3`,
+        ['completed', duration, jobId]
+      );
+    }
+
     res.json({ variants });
   } catch (error) {
-    console.error('Error in /api/generate-edits:', error);
+    const duration = Date.now() - startTime;
+    console.error(`[Job ${jobId}] Error in /api/generate-edits:`, error);
+
+    // Update job as failed
+    if (jobId) {
+      await dbQuery(
+        `UPDATE jobs
+         SET status = $1, completed_at = NOW(), duration_ms = $2, error_message = $3, error_stack = $4
+         WHERE id = $5`,
+        ['failed', duration, (error as Error).message, (error as Error).stack || null, jobId]
+      );
+    }
+
     res.status(500).json({
       error: 'Failed to generate edits',
       message: (error as Error).message

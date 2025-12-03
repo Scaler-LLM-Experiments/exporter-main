@@ -32,6 +32,43 @@ figma.on('selectionchange', updateSelectionState);
 // Send initial state
 updateSelectionState();
 
+// ============================================
+// User Email Collection
+// ============================================
+
+// Get current user info (cached for session)
+let cachedUserEmail: string | null = null;
+
+function getUserEmail(): string {
+  if (cachedUserEmail) {
+    return cachedUserEmail;
+  }
+
+  const user = figma.currentUser;
+  if (user) {
+    // Email property exists at runtime but not in TypeScript types
+    // Use type assertion to access it
+    const userWithEmail = user as any;
+    if (userWithEmail.email && typeof userWithEmail.email === 'string') {
+      cachedUserEmail = userWithEmail.email;
+      console.log('[Plugin] User email collected:', userWithEmail.email);
+      return userWithEmail.email;
+    }
+
+    // Fallback: If email not available, use ID
+    if (user.id) {
+      cachedUserEmail = `user-${user.id}@figma.local`;
+      console.log('[Plugin] Using fallback email (user ID):', cachedUserEmail);
+      return cachedUserEmail;
+    }
+  }
+
+  // Last resort fallback
+  cachedUserEmail = 'anonymous@figma.local';
+  console.log('[Plugin] Using anonymous email');
+  return cachedUserEmail;
+}
+
 interface LayerData {
   id: string;
   name: string;
@@ -737,6 +774,7 @@ async function exportLayersForRenaming(frame: FrameNode | ComponentNode): Promis
 
   figma.ui.postMessage({
     type: 'layers-for-renaming',
+    userEmail: getUserEmail(), // Add user email
     frameId: frame.id,
     frameName: frame.name,
     layers: layerExports
@@ -2565,6 +2603,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       figma.ui.postMessage({
         type: 'metadata-for-edits',
+        userEmail: getUserEmail(), // Add user email
         frameId: frame.id,
         frameName: frame.name,
         frameWidth: frame.width,
