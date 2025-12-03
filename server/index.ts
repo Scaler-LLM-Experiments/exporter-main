@@ -393,7 +393,16 @@ function parseAndValidateVariants(responseText: string, layers: LayerMetadata[])
 
   console.log('Cleaned JSON (first 500 chars):', cleaned.substring(0, 500));
 
-  const parsed = JSON.parse(cleaned);
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (parseError) {
+    console.error('JSON Parse Error:', parseError);
+    console.error('Full response text (first 2000 chars):\n', cleaned.substring(0, 2000));
+    console.error('Last 500 chars:\n', cleaned.substring(Math.max(0, cleaned.length - 500)));
+    const errorMsg = parseError instanceof Error ? parseError.message : String(parseError);
+    throw new Error(`Failed to parse AI response as JSON. The response may have been truncated. Try reducing the number of layers or simplifying the frame. Error: ${errorMsg}`);
+  }
 
   if (!parsed.variants || !Array.isArray(parsed.variants)) {
     throw new Error('Invalid response: missing variants array');
@@ -1166,7 +1175,7 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
         messages,
         stream: true,
         temperature: 1.0,
-        max_tokens: 8192,
+        max_tokens: 32000, // Very high limit to handle extremely complex frames with many layers
         include_reasoning: true
       });
 

@@ -643,6 +643,12 @@
   // Backend API Calls
   // ============================================
   async function callRenamingAPI(layers) {
+    const layerCount = layers.filter(l => l.imageData).length;
+    const batchCount = Math.ceil(layerCount / 10); // Backend processes 10 at a time
+
+    console.log(`[API] 📤 Sending ${layerCount} layers to AI for renaming (will be processed in ${batchCount} batch${batchCount > 1 ? 'es' : ''} of 10)`);
+    const startTime = Date.now();
+
     const response = await fetch(`${BACKEND_URL}/api/rename-layers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -664,10 +670,18 @@
       throw new Error(errorData.message || `Server error: ${response.statusText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+    const duration = Date.now() - startTime;
+    console.log(`[API] ✅ Received ${result.layers.length} renamed layers (took ${(duration / 1000).toFixed(1)}s)`);
+
+    return result;
   }
 
   async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64, generateImages = false) {
+    console.log(`[API] 🎨 Generating 5 design variants for "${frameName}" (${frameWidth}×${frameHeight}, ${layers.length} layers)`);
+    console.log(`[API] ⏳ AI is thinking... this may take 10-30 seconds`);
+    const startTime = Date.now();
+
     const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -702,7 +716,11 @@
       throw new Error(errorData.error || `Server error: ${response.statusText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+    const duration = Date.now() - startTime;
+    console.log(`[API] ✅ Generated ${result.variants.length} variants for "${frameName}" (took ${(duration / 1000).toFixed(1)}s)`);
+
+    return result;
   }
 
   async function uploadFrameToS3(frameName, zipBlob, variantCount, userEmail) {
@@ -958,26 +976,39 @@
         // Process frames in parallel batches (3 at a time)
         const BATCH_SIZE = 3;
         const allRenames = [];
+        const totalBatches = Math.ceil(frames.length / BATCH_SIZE);
+        const overallStartTime = Date.now();
+
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`🚀 AI RENAME STARTING: ${totalFrames} frame(s), ${totalBatches} batch${totalBatches > 1 ? 'es' : ''} of ${BATCH_SIZE}`);
+        console.log(`${'='.repeat(60)}\n`);
 
         for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
           const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
           const batch = frames.slice(batchStart, batchEnd);
+          const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+          const batchStartTime = Date.now();
 
-          console.log(`[UI] Processing batch: frames ${batchStart + 1}-${batchEnd} of ${totalFrames}`);
+          console.log(`\n📦 BATCH ${batchNum}/${totalBatches}: Processing frames ${batchStart + 1}-${batchEnd}`);
+          console.log(`─`.repeat(60));
 
           // Update progress for batch
           const batchFrameNames = batch.map(f => f.frameName).join(', ');
-          setButtonState(aiRenameBtn, 'loading', `AI analyzing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}...`);
-          showProgress(`AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames}...`);
+          setButtonState(aiRenameBtn, 'loading', `Processing ${batchNum}/${totalBatches}...`);
+          showProgress(`⏳ Batch ${batchNum}/${totalBatches}: AI analyzing ${batch.length} frame(s) - ${batchFrameNames}...`);
 
           // Process all frames in this batch in parallel
           const batchPromises = batch.map((frame, batchIndex) => {
             const frameIndex = batchStart + batchIndex;
-            console.log(`[UI] Starting parallel AI rename for frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${frame.layers.length} layers)`);
+            const layerCount = frame.layers.filter(l => l.imageData).length;
+            console.log(`  🎯 [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${layerCount} layers`);
 
             return callRenamingAPI(frame.layers).then(result => {
-              console.log(`[UI] Completed frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${result.layers.length} renames)`);
+              console.log(`  ✅ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${result.layers.length} layers renamed`);
               return result.layers; // Return just the renames array
+            }).catch(error => {
+              console.error(`  ❌ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - Error: ${error.message}`);
+              throw error;
             });
           });
 
@@ -989,10 +1020,17 @@
             allRenames.push(...renames);
           }
 
-          console.log(`[UI] Batch complete: ${batchResults.length} frame(s) processed`);
+          const batchDuration = Date.now() - batchStartTime;
+          console.log(`─`.repeat(60));
+          console.log(`✅ BATCH ${batchNum}/${totalBatches} COMPLETE: ${batchResults.length} frame(s) processed in ${(batchDuration / 1000).toFixed(1)}s`);
         }
 
-        console.log(`[UI] Total: ${allRenames.length} renames from ${totalFrames} frame(s)`);
+        const overallDuration = Date.now() - overallStartTime;
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`🎉 AI RENAME COMPLETE!`);
+        console.log(`   Total: ${allRenames.length} layers renamed from ${totalFrames} frame(s)`);
+        console.log(`   Time: ${(overallDuration / 1000).toFixed(1)}s total`);
+        console.log(`${'='.repeat(60)}\n`);
 
         // Send all renames back to plugin to apply
         setButtonState(aiRenameBtn, 'loading', 'Applying names...');
@@ -1103,29 +1141,39 @@
         const generateImagesCheckbox = document.getElementById('generate-images');
         const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
 
-        // Process frames in parallel batches (3 at a time for optimal performance)
-        const BATCH_SIZE = 3;
+        // Process frames in parallel batches (8 at a time for optimal performance)
+        const BATCH_SIZE = 8;
         const allFrameVariants = [];
+        const totalBatches = Math.ceil(frames.length / BATCH_SIZE);
+        const overallStartTime = Date.now();
+
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`🎨 VARIANT GENERATION STARTING: ${totalFrames} frame(s), ${totalBatches} batch${totalBatches > 1 ? 'es' : ''} of ${BATCH_SIZE}`);
+        console.log(`   AI Images: ${generateImages ? 'ENABLED ✨' : 'Disabled'}`);
+        console.log(`${'='.repeat(60)}\n`);
 
         // Process frames in batches
         for (let batchStart = 0; batchStart < frames.length; batchStart += BATCH_SIZE) {
           const batchEnd = Math.min(batchStart + BATCH_SIZE, frames.length);
           const batch = frames.slice(batchStart, batchEnd);
+          const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+          const batchStartTime = Date.now();
 
-          console.log(`[UI] Processing batch: frames ${batchStart + 1}-${batchEnd} of ${totalFrames}`);
+          console.log(`\n📦 BATCH ${batchNum}/${totalBatches}: Processing frames ${batchStart + 1}-${batchEnd}`);
+          console.log(`─`.repeat(60));
 
           // Update progress for batch
           const batchFrameNames = batch.map(f => f.frameName).join(', ');
-          setButtonState(generateEditsBtn, 'loading', `AI analyzing batch ${Math.floor(batchStart / BATCH_SIZE) + 1}...`);
+          setButtonState(generateEditsBtn, 'loading', `Generating ${batchNum}/${totalBatches}...`);
           const progressMsg = generateImages
-            ? `AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames} (with AI images)...`
-            : `AI analyzing ${batch.length} frame(s) in parallel: ${batchFrameNames}...`;
+            ? `⏳ Batch ${batchNum}/${totalBatches}: Generating variants + AI images for ${batch.length} frame(s)...`
+            : `⏳ Batch ${batchNum}/${totalBatches}: Generating variants for ${batch.length} frame(s)...`;
           showProgress(progressMsg);
 
           // Process all frames in this batch in parallel
           const batchPromises = batch.map((frame, batchIndex) => {
             const frameIndex = batchStart + batchIndex;
-            console.log(`[UI] Starting parallel processing for frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName}`);
+            console.log(`  🎯 [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${frame.layers.length} layers`);
 
             return callGenerateEditsAPI(
               frame.frameName,
@@ -1135,12 +1183,15 @@
               frame.frameImageBase64,
               generateImages
             ).then(result => {
-              console.log(`[UI] Completed frame ${frameIndex + 1}/${totalFrames}: ${frame.frameName} (${result.variants.length} variants)`);
+              console.log(`  ✅ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - ${result.variants.length} variants generated`);
               return {
                 frameId: frame.frameId,
                 frameName: frame.frameName,
                 variants: result.variants
               };
+            }).catch(error => {
+              console.error(`  ❌ [${frameIndex + 1}/${totalFrames}] "${frame.frameName}" - Error: ${error.message}`);
+              throw error;
             });
           });
 
@@ -1148,10 +1199,20 @@
           const batchResults = await Promise.all(batchPromises);
           allFrameVariants.push(...batchResults);
 
-          console.log(`[UI] Batch complete: ${batchResults.length} frame(s) processed`);
+          const batchDuration = Date.now() - batchStartTime;
+          const batchVariantCount = batchResults.reduce((sum, f) => sum + f.variants.length, 0);
+          console.log(`─`.repeat(60));
+          console.log(`✅ BATCH ${batchNum}/${totalBatches} COMPLETE: ${batchResults.length} frame(s), ${batchVariantCount} variants in ${(batchDuration / 1000).toFixed(1)}s`);
         }
 
-        console.log(`[UI] Total: ${allFrameVariants.length} frame(s) processed, ${allFrameVariants.reduce((sum, f) => sum + f.variants.length, 0)} total variants`);
+        const overallDuration = Date.now() - overallStartTime;
+        const totalVariants = allFrameVariants.reduce((sum, f) => sum + f.variants.length, 0);
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`🎉 VARIANT GENERATION COMPLETE!`);
+        console.log(`   Total: ${totalVariants} variants from ${totalFrames} frame(s)`);
+        console.log(`   Time: ${(overallDuration / 1000).toFixed(1)}s total`);
+        console.log(`   Avg: ${(overallDuration / totalFrames / 1000).toFixed(1)}s per frame`);
+        console.log(`${'='.repeat(60)}\n`);
 
         // Send all variants back to plugin to apply
         setButtonState(generateEditsBtn, 'loading', 'Applying edits...');

@@ -12,10 +12,10 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// Heavy operation rate limit (generate-edits)
+// Heavy operation rate limit (generate-edits, upload-to-s3)
 export const heavyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 5, // 5 generate-edits per minute per IP
+  max: 40, // 40 heavy operations per minute per IP (generous limit for bulk processing)
   message: {
     error: 'Too many complex requests',
     message: 'Please wait before generating more variants'
@@ -27,7 +27,7 @@ export const heavyLimiter = rateLimit({
 // Rename layers rate limit (generous)
 export const renameRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 rename requests per minute per IP
+  max: 30, // 30 rename requests per minute per IP (supports large batches)
   message: {
     error: 'Too many rename requests',
     message: 'Please wait before renaming more layers'

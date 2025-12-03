@@ -132,6 +132,8 @@ The plugin includes an optional AI-powered backend (`server/index.ts`) that prov
 - Uses pro reasoning model (`gemini-2.0-flash` or configurable via `OPENROUTER_MODEL_PRO`)
 - Generates 5 creative design variations with JSON edit instructions (move, changeFill, changeText, resize, etc.)
 - Each variant includes human-readable prompt and executable instructions
+- **Parallel processing**: Processes up to 8 frames concurrently (UI-side batching, not API batching)
+- **High token limit**: 32K max_tokens to handle extremely complex frames with 100+ layers
 - Optionally generates AI images for layers with `hasImageFill: true` (requires `OPENROUTER_MODEL_IMAGE`)
 - System prompt customizable via `EDIT_PROMPT_FILE` env var (see `server/prompts/` for options)
 - Used in "Generate Edits (5 variants)" button workflow
@@ -154,9 +156,10 @@ The plugin includes an optional AI-powered backend (`server/index.ts`) that prov
 - Connection pool with 20 max connections, 30s idle timeout
 
 **5. Rate Limiting** (`server/lib/rateLimiter.ts`):
-- General API rate limiting: Applied to all `/api/` routes
-- Heavy operation limiting: Applied to `generate-edits` and `upload-to-s3`
-- Rename-specific limiting: Applied to `rename-layers` endpoint
+- General API rate limiting: 30 requests/minute - Applied to all `/api/` routes
+- Heavy operation limiting: 40 requests/minute - Applied to `generate-edits` and `upload-to-s3`
+- Rename-specific limiting: 30 requests/minute - Applied to `rename-layers` endpoint
+- All limits are per-IP address with 1-minute rolling windows
 
 **6. Concurrency Control** (`server/lib/concurrency.ts`):
 - `renameLimiter`: Limits parallel rename operations
