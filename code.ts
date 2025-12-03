@@ -409,7 +409,7 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
   // Build frame metadata (positioned at 0,0 since it's the base)
   const frameLayerData: LayerData = {
     id: frame.id,
-    name: frame.name + ' (Frame Base)',
+    name: frame.name + '_base',
     type: frame.type,
     x: 0,
     y: 0,
