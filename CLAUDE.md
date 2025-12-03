@@ -14,8 +14,9 @@ This is a Figma plugin called "exporter" that exports frames and their layers as
 - **Reconstruct image**: `npm run reconstruct <folder-path>` - Rebuilds composite image from exported layers
 - **Lint**: `npm run lint` - Check code with ESLint
 - **Fix lint issues**: `npm run lint:fix` - Auto-fix ESLint issues
-- **Start AI server**: `npm run server` - Starts the backend server for AI layer renaming (requires `npm run server:install` first)
+- **Start AI server**: `npm run server` - Starts the backend server for AI features (requires `npm run server:install` first)
 - **Install server deps**: `npm run server:install` - Installs dependencies for the AI server
+- **Production server**: `npm run server:start` - Starts server without auto-reload (uses ts-node)
 
 Note: The compiled `code.js` is what Figma executes, not `code.ts` directly.
 
@@ -32,18 +33,33 @@ Figma plugins run in two separate contexts that communicate via message passing:
 
 2. **UI Context** (`ui.html`):
    - Full browser environment with standard web APIs
-   - Displays plugin interface with frame selection indicator and export button
-   - Currently hardcoded to export PNG at 4x resolution
+   - Displays plugin interface with frame selection indicator, export settings, and action buttons
    - Uses JSZip library (loaded from CDN) to create downloadable ZIP files
    - Reconstructs composite images client-side using Canvas API (PNG) or SVG composition (SVG)
    - Communicates with main context via `parent.postMessage()`
+   - Handles all HTTP requests to the AI backend server (main context cannot make network calls)
 
 ### Message Passing Pattern
-- UI sends messages: `parent.postMessage({ pluginMessage: { type: 'action-name', ...data } }, '*')`
-- Main receives messages: `figma.ui.onmessage = (msg) => { ... }`
-- Main shows UI: `figma.showUI(__html__)`
-- Main sends progress updates: `figma.ui.postMessage({ type: 'progress', message: '...' })`
-- Main sends export data: `figma.ui.postMessage({ type: 'export-data', ... })`
+
+**UI → Main** (via `parent.postMessage`):
+- `export-frame` - Export selected frames with layers
+- `break-groups` - Flatten groups in selection
+- `rasterize-selection` - Convert selection to raster images
+- `export-for-renaming` - Export layers for AI renaming
+- `apply-renames` - Apply AI-generated names to layers
+- `duplicate-and-export` - Create duplicates and export
+- `prepare-for-edits` - Prepare frame metadata for AI variations
+- `apply-edit-variants` - Apply AI-generated design variations
+- `cancel` - Close plugin
+
+**Main → UI** (via `figma.ui.postMessage`):
+- `selection-change` - Update UI when selection changes
+- `progress` - Show progress messages during operations
+- `export-data` - Send exported layer data and metadata
+- `layers-for-renaming` - Send layer images for AI analysis
+- `groups-broken` - Report results of group flattening
+- `rasterized` - Report results of rasterization
+- Various error and success messages for each operation
 
 ### Layer Collection Strategy
 
@@ -85,29 +101,36 @@ The plugin provides two reconstruction methods:
 
 Both reconstruction methods use the same algorithm: sort layers by z-index, apply scale factor to all coordinates, and composite layers in order using export bounds for positioning.
 
-### AI Layer Renaming (Backend Server)
+### AI Backend Server
 
-The plugin includes an optional AI-powered layer renaming feature that uses Google's Gemini Vision API:
+The plugin includes an optional AI-powered backend (`server/index.ts`) that provides two key features:
 
-1. **Backend Server** (`server/index.ts`):
-   - Express server running on `localhost:3000`
-   - Receives layer images from the plugin UI
-   - Sends images to Gemini Vision API for analysis
-   - Returns AI-generated concise names (3-5 words, snake_case format)
-   - Requires `GEMINI_API_KEY` environment variable (copy `server/.env.example` to `server/.env`)
+1. **Backend Server Configuration**:
+   - Express server running on `localhost:3000` (configurable via `PORT` env var)
+   - Supports two AI providers: Google Gemini (direct) or OpenRouter (with multiple model options)
+   - Provider selected via `AI_PROVIDER` env var (defaults to `gemini`)
+   - Requires API keys in `server/.env` (copy from `server/.env.example`)
+   - System prompts externalized to `server/prompts/` directory for easy experimentation
 
-2. **Flow**:
-   - User clicks "AI Rename + Export (6 frames)" button
-   - Plugin exports each layer as 1x PNG
-   - UI sends images to backend server
-   - Backend calls Gemini Vision for each layer
-   - Plugin receives AI names and renames layers in Figma document
-   - Plugin creates 5 duplicate frames (with `_1` to `_5` suffixes)
-   - All 6 frames are exported with AI-generated layer names in metadata
+2. **AI Layer Renaming** (`POST /api/rename-layers`):
+   - **Flow**: UI exports layers as 1x PNG → sends to backend → backend calls AI vision model → returns snake_case names
+   - Uses fast vision model (`gemini-2.5-flash-lite-preview` or configurable via `OPENROUTER_MODEL_FAST`)
+   - Generates concise 3-5 word names from layer images
+   - Plugin receives names and renames layers in Figma document
+   - Used in "AI Rename Layers" button workflow
 
-3. **Network Access**:
+3. **AI Design Variations** (`POST /api/generate-edits`):
+   - **Flow**: UI sends frame metadata → backend calls reasoning model → returns 5 variant instructions → plugin applies edits
+   - Uses pro reasoning model (`gemini-2.0-flash` or configurable via `OPENROUTER_MODEL_PRO`)
+   - Generates 5 creative design variations with JSON edit instructions (move, changeFill, changeText, resize, etc.)
+   - Each variant includes human-readable prompt and executable instructions
+   - Optionally generates AI images for layers with `hasImageFill: true` (requires `OPENROUTER_MODEL_IMAGE`)
+   - System prompt customizable via `EDIT_PROMPT_FILE` env var (see `server/prompts/` for options)
+   - Used in "Generate Edits (5 variants)" button workflow
+
+4. **Network Access**:
    - `devAllowedDomains` in `manifest.json` allows `localhost:3000` during development
-   - Plugin UI makes HTTP requests to the backend (plugin main context cannot make network calls)
+   - Plugin UI makes all HTTP requests (main context cannot access network)
 
 ### Key Configuration Files
 
@@ -115,7 +138,8 @@ The plugin includes an optional AI-powered layer renaming feature that uses Goog
   - `main`: Entry point (`code.js`)
   - `ui`: HTML file for the interface (`ui.html`)
   - `documentAccess`: Set to "dynamic-page" (can access current page on demand)
-  - `networkAccess.allowedDomains`: Allows CDN access for JSZip library (`https://cdnjs.cloudflare.com`)
+  - `networkAccess.allowedDomains`: Allows CDN access for JSZip and Google Fonts (Manrope font)
+  - `networkAccess.devAllowedDomains`: Allows `localhost:3000` for AI backend during development
   - `editorType`: Only runs in Figma (not FigJam)
 
 - **tsconfig.json**: Plugin TypeScript config
@@ -130,12 +154,48 @@ The plugin includes an optional AI-powered layer renaming feature that uses Goog
 
 - **package.json**: Contains ESLint configuration with Figma-specific rules from `@figma/eslint-plugin-figma-plugins`
 
+## Plugin Features
+
+The plugin provides six main operations accessible via UI buttons:
+
+1. **Export Frame** (`export-frame`):
+   - Exports selected frame(s) with configurable format (PNG/SVG) and scale factor (1x-4x)
+   - Decomposes frame into layers, exports each separately with metadata
+   - Creates ZIP file with layers, metadata JSON, and reconstructed composite image
+
+2. **Break Groups Apart** (`break-groups`):
+   - Recursively flattens all groups in selection
+   - Preserves layer positioning and properties
+   - Updates selection to show ungrouped layers
+
+3. **Rasterize Selection** (`rasterize-selection`):
+   - Converts selected objects to 4x resolution raster images
+   - Replaces original vector/text layers with PNG images
+   - Useful for optimizing complex effects or preparing for export
+
+4. **AI Rename Layers** (`export-for-renaming` → `apply-renames` → `duplicate-and-export`):
+   - Exports layers as 1x PNG images
+   - Sends to backend for AI vision analysis
+   - Renames layers in Figma with AI-generated snake_case names
+   - Duplicates frame 5 times (creates `_1` through `_5` variants)
+   - Exports all 6 frames with updated metadata
+
+5. **Generate Edits (5 variants)** (`prepare-for-edits` → `apply-edit-variants`):
+   - Sends frame metadata to backend for AI reasoning
+   - Backend returns 5 creative design variations with JSON instructions
+   - Plugin applies instructions to create 5 duplicate frames with variations
+   - Each frame shows AI prompt card and detailed change summary
+   - Frames are vertically stacked with spacing for easy review
+   - Optional: Generate AI images for layers marked with `hasImageFill: true`
+
+6. **Health Check**: Backend provides `GET /health` endpoint for status monitoring
+
 ## Development Notes
 
 - TypeScript must be compiled (`npm run build`) before testing the plugin in Figma
-- The plugin has two export modes:
-  - **Export Only**: Exports selected frame as PNG at 4x resolution
-  - **AI Rename + Export**: Renames layers using AI, duplicates frame 5 times, exports all 6 frames
+- Watch mode (`npm run watch`) auto-recompiles on file changes during development
 - ESLint is configured to ignore unused variables that start with underscore
 - The reconstruction script (`reconstruct.ts`) requires the `sharp` npm package for image processing
-- For AI renaming: start the backend server (`npm run server`) and ensure `GEMINI_API_KEY` is set in `server/.env`
+- For AI features: start backend server (`npm run server`) and configure `server/.env` with API keys
+- AI provider selection: set `AI_PROVIDER=gemini` or `AI_PROVIDER=openrouter` in `server/.env`
+- Custom prompts: create new files in `server/prompts/` and set `EDIT_PROMPT_FILE` to test different system prompts
