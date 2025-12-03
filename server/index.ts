@@ -44,6 +44,168 @@ interface RenameResponse {
   }>;
 }
 
+// ============================================
+// Generate Edits Types
+// ============================================
+
+interface LayerMetadata {
+  name: string;
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fills?: Array<{ type: string; color?: string; opacity?: number }>;
+  strokes?: Array<{ type: string; color?: string; opacity?: number }>;
+  opacity?: number;
+  text?: string;
+  fontSize?: number;
+  cornerRadius?: number | { topLeft: number; topRight: number; bottomLeft: number; bottomRight: number };
+}
+
+interface GenerateEditsRequest {
+  frameName: string;
+  frameWidth: number;
+  frameHeight: number;
+  layers: LayerMetadata[];
+}
+
+interface EditInstruction {
+  action: string;
+  target: string;
+  x?: number;
+  y?: number;
+  relative?: boolean;
+  color?: string;
+  opacity?: number;
+  weight?: number;
+  content?: string;
+  width?: number;
+  height?: number;
+  scale?: number;
+  position?: 'front' | 'back' | number;
+}
+
+interface EditVariant {
+  variantIndex: number;
+  humanPrompt: string;
+  theme: string;
+  instructions: EditInstruction[];
+}
+
+// System prompt for edit generation
+const EDIT_GENERATION_PROMPT = `You are a UI design variation generator. Given metadata about a Figma frame's layers, you generate 5 distinct creative variations by producing JSON instructions that modify the design.
+
+## Available Actions
+- move: Change layer position {action: "move", target: "layer_name", x: number, y: number, relative?: boolean}
+- changeFill: Change fill color {action: "changeFill", target: "layer_name", color: "#RRGGBB", opacity?: 0-1}
+- changeStroke: Change stroke {action: "changeStroke", target: "layer_name", color: "#RRGGBB", opacity?: 0-1, weight?: number}
+- changeText: Change text content {action: "changeText", target: "layer_name", content: "new text"}
+- resize: Change dimensions {action: "resize", target: "layer_name", width?: number, height?: number, scale?: number}
+- changeOpacity: Change layer opacity {action: "changeOpacity", target: "layer_name", opacity: 0-1}
+- reorder: Change z-index {action: "reorder", target: "layer_name", position: "front" | "back"}
+
+## Guidelines
+1. Each variant should be distinctly different (e.g., color themes, layout changes, text variations)
+2. Target layers by their EXACT NAME as provided in the metadata
+3. Consider the design context - maintain visual harmony
+4. Suggest meaningful variations:
+   - Color scheme changes (light/dark, warm/cool, brand colors)
+   - Layout adjustments (spacing, alignment, repositioning)
+   - Text alternatives (different CTAs, headlines, descriptions)
+   - Visual emphasis changes (opacity, size adjustments)
+5. Limit each variant to 3-8 instructions for focused changes
+6. Ensure instructions are executable (valid hex colors like #FF5500, reasonable dimensions)
+7. Do NOT reference layers that don't exist in the metadata
+
+## Output Format
+Return ONLY a valid JSON object with this exact structure:
+{
+  "variants": [
+    {
+      "variantIndex": 1,
+      "humanPrompt": "Brief description of changes",
+      "theme": "Theme Name",
+      "instructions": [
+        {"action": "changeFill", "target": "exact_layer_name", "color": "#RRGGBB"}
+      ]
+    }
+  ]
+}
+
+Provide exactly 5 variants. No markdown, no explanation, just valid JSON.`;
+
+// Build the user prompt with layer metadata
+function buildEditPrompt(
+  frameName: string,
+  frameWidth: number,
+  frameHeight: number,
+  layers: LayerMetadata[]
+): string {
+  // Create a simplified view of layers for the prompt
+  const layerSummary = layers.map(l => ({
+    name: l.name,
+    type: l.type,
+    position: { x: Math.round(l.x), y: Math.round(l.y) },
+    size: { width: Math.round(l.width), height: Math.round(l.height) },
+    fills: l.fills?.filter(f => f.type === 'SOLID').map(f => f.color),
+    opacity: l.opacity,
+    text: l.text
+  }));
+
+  return `Generate 5 design variations for this Figma frame.
+
+## Frame Information
+Name: ${frameName}
+Dimensions: ${frameWidth} x ${frameHeight} pixels
+
+## Available Layers (${layers.length} total)
+${JSON.stringify(layerSummary, null, 2)}
+
+Remember: Target layers by their EXACT name from the list above. Return ONLY valid JSON.`;
+}
+
+// Parse and validate the AI response
+function parseAndValidateVariants(responseText: string, layers: LayerMetadata[]): EditVariant[] {
+  // Clean up potential markdown formatting
+  let cleaned = responseText.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  const parsed = JSON.parse(cleaned);
+
+  if (!parsed.variants || !Array.isArray(parsed.variants)) {
+    throw new Error('Invalid response: missing variants array');
+  }
+
+  // Get all valid layer names for validation
+  const layerNames = new Set(layers.map(l => l.name));
+
+  // Validate each variant
+  for (const variant of parsed.variants) {
+    if (!variant.instructions || !Array.isArray(variant.instructions)) {
+      variant.instructions = [];
+      continue;
+    }
+
+    // Filter out instructions targeting non-existent layers
+    variant.instructions = variant.instructions.filter((inst: EditInstruction) => {
+      if (!inst.target || !layerNames.has(inst.target)) {
+        console.warn(`  Skipping instruction for unknown layer: "${inst.target}"`);
+        return false;
+      }
+      if (!inst.action) {
+        console.warn(`  Skipping instruction with missing action`);
+        return false;
+      }
+      return true;
+    });
+  }
+
+  return parsed.variants;
+}
+
 // Generate layer name using Gemini Vision
 async function generateLayerName(
   imageBase64: string,
@@ -150,16 +312,66 @@ app.post('/api/rename-layers', async (req: Request, res: Response) => {
   }
 });
 
+// ============================================
+// Generate Edits Endpoint
+// ============================================
+app.post('/api/generate-edits', async (req: Request, res: Response) => {
+  try {
+    const { frameName, frameWidth, frameHeight, layers }: GenerateEditsRequest = req.body;
+
+    if (!layers || !Array.isArray(layers) || layers.length === 0) {
+      res.status(400).json({ error: 'Invalid request: layers array required' });
+      return;
+    }
+
+    console.log(`\n========================================`);
+    console.log(`Generating edits for frame "${frameName}"`);
+    console.log(`Frame size: ${frameWidth} x ${frameHeight}`);
+    console.log(`Layers: ${layers.length}`);
+    console.log(`========================================\n`);
+
+    // Build the prompt
+    const userPrompt = buildEditPrompt(frameName, frameWidth, frameHeight, layers);
+
+    // Call Gemini
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const result = await model.generateContent([EDIT_GENERATION_PROMPT, userPrompt]);
+    const responseText = result.response.text();
+
+    console.log('Raw Gemini response (first 1000 chars):');
+    console.log(responseText.substring(0, 1000));
+    console.log('...\n');
+
+    // Parse and validate
+    const variants = parseAndValidateVariants(responseText, layers);
+
+    console.log(`Generated ${variants.length} variants:`);
+    variants.forEach((v, i) => {
+      console.log(`  ${i + 1}. ${v.theme}: ${v.instructions.length} instructions`);
+      console.log(`     "${v.humanPrompt}"`);
+    });
+
+    res.json({ variants });
+  } catch (error) {
+    console.error('Error in /api/generate-edits:', error);
+    res.status(500).json({
+      error: 'Failed to generate edits',
+      message: (error as Error).message
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`
 ========================================
-  Layer Renaming Server
+  Figma Exporter AI Server
   Running on http://localhost:${PORT}
 ========================================
 
 Endpoints:
   GET  /health              - Health check
   POST /api/rename-layers   - Rename layers using AI
+  POST /api/generate-edits  - Generate 5 design variations
 
 Ready to receive requests from Figma plugin.
 `);

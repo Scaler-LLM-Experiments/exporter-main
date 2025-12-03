@@ -74,6 +74,48 @@ interface ExportData {
   scale: number;
 }
 
+// ============================================
+// Generate Edits Types
+// ============================================
+
+interface LayerMetadataForAI {
+  name: string;
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fills?: Array<{ type: string; color?: string; opacity?: number }>;
+  strokes?: Array<{ type: string; color?: string; opacity?: number }>;
+  opacity?: number;
+  text?: string;
+  fontSize?: number;
+  cornerRadius?: number | { topLeft: number; topRight: number; bottomLeft: number; bottomRight: number };
+}
+
+interface EditInstruction {
+  action: string;
+  target: string;
+  x?: number;
+  y?: number;
+  relative?: boolean;
+  color?: string;
+  opacity?: number;
+  weight?: number;
+  content?: string;
+  width?: number;
+  height?: number;
+  scale?: number;
+  position?: 'front' | 'back' | number;
+}
+
+interface EditVariant {
+  variantIndex: number;
+  humanPrompt: string;
+  theme: string;
+  instructions: EditInstruction[];
+}
+
 // Helper function to create a safe filename from layer name
 function createFilename(name: string, id: string): string {
   // Sanitize the layer name: remove/replace invalid filename characters
@@ -752,6 +794,394 @@ async function duplicateFrameAndExport(
 }
 
 // ============================================
+// Generate Edits Functions
+// ============================================
+
+// Extract simplified metadata for AI processing (without images)
+async function extractLayerMetadataForEdits(
+  frame: FrameNode | ComponentNode
+): Promise<LayerMetadataForAI[]> {
+  const allLayers: SceneNode[] = [];
+  if ('children' in frame) {
+    for (const child of frame.children) {
+      collectLayers(child, allLayers);
+    }
+  }
+
+  const metadata: LayerMetadataForAI[] = [];
+
+  for (const layer of allLayers) {
+    const pos = getAbsolutePosition(layer, frame);
+    const fills = extractFills(layer);
+    const strokes = extractStrokes(layer);
+    const text = await extractText(layer);
+    const textProps = extractTextProperties(layer);
+
+    metadata.push({
+      name: layer.name,
+      type: layer.type,
+      x: Math.round(pos.x * 100) / 100,
+      y: Math.round(pos.y * 100) / 100,
+      width: Math.round(layer.width * 100) / 100,
+      height: Math.round(layer.height * 100) / 100,
+      fills: fills,
+      strokes: strokes,
+      opacity: 'opacity' in layer ? layer.opacity : 1,
+      text: text || undefined,
+      fontSize: textProps?.fontSize,
+      cornerRadius: extractCornerRadius(layer)
+    });
+  }
+
+  return metadata;
+}
+
+// Find a layer node by name within a frame
+function findLayerByName(
+  frame: FrameNode | ComponentNode,
+  targetName: string
+): SceneNode | null {
+  const allLayers: SceneNode[] = [];
+  if ('children' in frame) {
+    for (const child of frame.children) {
+      collectLayers(child, allLayers);
+    }
+  }
+
+  return allLayers.find(layer => layer.name === targetName) || null;
+}
+
+// Helper to convert hex to RGB for Figma
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16) / 255,
+    g: parseInt(result[2], 16) / 255,
+    b: parseInt(result[3], 16) / 255
+  } : null;
+}
+
+// Helper to get parent's absolute position relative to frame
+function getParentOffset(node: SceneNode, frame: FrameNode | ComponentNode): { x: number; y: number } {
+  let x = 0, y = 0;
+  let current = node.parent;
+
+  while (current && current !== frame) {
+    if ('x' in current && 'y' in current) {
+      x += current.x;
+      y += current.y;
+    }
+    current = current.parent;
+  }
+
+  return { x, y };
+}
+
+// ============================================
+// Edit Instruction Executors
+// ============================================
+
+// Execute a single edit instruction on a frame
+async function executeEditInstruction(
+  frame: FrameNode | ComponentNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  const layer = findLayerByName(frame, instruction.target);
+
+  if (!layer) {
+    return { success: false, error: `Layer not found: ${instruction.target}` };
+  }
+
+  try {
+    switch (instruction.action) {
+      case 'move':
+        return executeMove(layer, instruction, frame);
+      case 'changeFill':
+        return executeChangeFill(layer, instruction);
+      case 'changeStroke':
+        return executeChangeStroke(layer, instruction);
+      case 'changeText':
+        return await executeChangeText(layer, instruction);
+      case 'resize':
+        return executeResize(layer, instruction);
+      case 'changeOpacity':
+        return executeChangeOpacity(layer, instruction);
+      case 'reorder':
+        return executeReorder(layer, instruction);
+      default:
+        return { success: false, error: `Unknown action: ${instruction.action}` };
+    }
+  } catch (error) {
+    return { success: false, error: (error as Error).message };
+  }
+}
+
+// Move layer to new position
+function executeMove(
+  layer: SceneNode,
+  instruction: EditInstruction,
+  frame: FrameNode | ComponentNode
+): { success: boolean; error?: string } {
+  if (!('x' in layer) || !('y' in layer)) {
+    return { success: false, error: 'Layer cannot be moved' };
+  }
+
+  if (instruction.x === undefined || instruction.y === undefined) {
+    return { success: false, error: 'Move requires x and y coordinates' };
+  }
+
+  if (instruction.relative) {
+    layer.x += instruction.x;
+    layer.y += instruction.y;
+  } else {
+    // Convert absolute frame coordinates to local coordinates
+    const parentOffset = getParentOffset(layer, frame);
+    layer.x = instruction.x - parentOffset.x;
+    layer.y = instruction.y - parentOffset.y;
+  }
+
+  return { success: true };
+}
+
+// Change fill color
+function executeChangeFill(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('fills' in layer)) {
+    return { success: false, error: 'Layer does not support fills' };
+  }
+
+  if (!instruction.color) {
+    return { success: false, error: 'changeFill requires color' };
+  }
+
+  const rgb = hexToRgb(instruction.color);
+  if (!rgb) {
+    return { success: false, error: `Invalid color: ${instruction.color}` };
+  }
+
+  const newFill: SolidPaint = {
+    type: 'SOLID',
+    color: { r: rgb.r, g: rgb.g, b: rgb.b },
+    opacity: instruction.opacity ?? 1
+  };
+
+  (layer as GeometryMixin).fills = [newFill];
+  return { success: true };
+}
+
+// Change stroke
+function executeChangeStroke(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('strokes' in layer)) {
+    return { success: false, error: 'Layer does not support strokes' };
+  }
+
+  if (!instruction.color) {
+    return { success: false, error: 'changeStroke requires color' };
+  }
+
+  const rgb = hexToRgb(instruction.color);
+  if (!rgb) {
+    return { success: false, error: `Invalid color: ${instruction.color}` };
+  }
+
+  const newStroke: SolidPaint = {
+    type: 'SOLID',
+    color: { r: rgb.r, g: rgb.g, b: rgb.b },
+    opacity: instruction.opacity ?? 1
+  };
+
+  (layer as GeometryMixin).strokes = [newStroke];
+
+  if (instruction.weight !== undefined && 'strokeWeight' in layer) {
+    (layer as GeometryMixin).strokeWeight = instruction.weight;
+  }
+
+  return { success: true };
+}
+
+// Change text content
+async function executeChangeText(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+
+  if (!instruction.content) {
+    return { success: false, error: 'changeText requires content' };
+  }
+
+  const textNode = layer as TextNode;
+
+  try {
+    // Load the font before modifying text
+    const fontName = textNode.fontName;
+    if (fontName !== figma.mixed) {
+      await figma.loadFontAsync(fontName);
+    } else {
+      // For mixed fonts, try to load the first character's font
+      const firstFont = textNode.getRangeFontName(0, 1);
+      if (firstFont !== figma.mixed) {
+        await figma.loadFontAsync(firstFont);
+      }
+    }
+    textNode.characters = instruction.content;
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `Failed to change text: ${(error as Error).message}` };
+  }
+}
+
+// Resize layer
+function executeResize(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('resize' in layer)) {
+    return { success: false, error: 'Layer cannot be resized' };
+  }
+
+  const resizable = layer as SceneNode & { resize: (width: number, height: number) => void };
+
+  let newWidth = layer.width;
+  let newHeight = layer.height;
+
+  if (instruction.scale !== undefined) {
+    newWidth = layer.width * instruction.scale;
+    newHeight = layer.height * instruction.scale;
+  } else {
+    if (instruction.width !== undefined) newWidth = instruction.width;
+    if (instruction.height !== undefined) newHeight = instruction.height;
+  }
+
+  resizable.resize(newWidth, newHeight);
+  return { success: true };
+}
+
+// Change opacity
+function executeChangeOpacity(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('opacity' in layer)) {
+    return { success: false, error: 'Layer does not support opacity' };
+  }
+
+  if (instruction.opacity === undefined) {
+    return { success: false, error: 'changeOpacity requires opacity value' };
+  }
+
+  const clampedOpacity = Math.max(0, Math.min(1, instruction.opacity));
+  (layer as BlendMixin).opacity = clampedOpacity;
+  return { success: true };
+}
+
+// Reorder layer (z-index)
+function executeReorder(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  const parent = layer.parent;
+  if (!parent || !('children' in parent)) {
+    return { success: false, error: 'Cannot reorder: invalid parent' };
+  }
+
+  const children = [...parent.children];
+  const currentIndex = children.indexOf(layer);
+  if (currentIndex === -1) {
+    return { success: false, error: 'Layer not found in parent' };
+  }
+
+  if (instruction.position === 'front') {
+    // Move to front (last child = topmost in z-order)
+    parent.appendChild(layer);
+  } else if (instruction.position === 'back') {
+    // Move to back (first child = bottommost in z-order)
+    parent.insertChild(0, layer);
+  } else if (typeof instruction.position === 'number') {
+    const targetIndex = Math.max(0, Math.min(children.length - 1, instruction.position));
+    parent.insertChild(targetIndex, layer);
+  }
+
+  return { success: true };
+}
+
+// ============================================
+// Generate Edits Orchestrator
+// ============================================
+
+// Main function to apply edit variants and create modified frames
+async function applyEditVariants(
+  originalFrame: FrameNode | ComponentNode,
+  variants: EditVariant[],
+  format: string,
+  scale: number
+): Promise<void> {
+  const framesToExport: (FrameNode | ComponentNode)[] = [originalFrame];
+  const originalName = originalFrame.name;
+
+  figma.ui.postMessage({
+    type: 'progress',
+    message: 'Creating frame variants with AI-generated edits...'
+  });
+
+  // Create duplicates and apply different edits to each
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+
+    figma.ui.postMessage({
+      type: 'progress',
+      message: `Creating variant ${i + 1}/${variants.length}: ${variant.theme}...`
+    });
+
+    // Clone the frame
+    const clone = originalFrame.clone();
+    const themeSlug = variant.theme.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    clone.name = `${originalName}_v${i + 1}_${themeSlug}`;
+    clone.x = originalFrame.x + (originalFrame.width + 50) * (i + 1);
+
+    // Apply all instructions for this variant
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const instruction of variant.instructions) {
+      const result = await executeEditInstruction(clone as FrameNode, instruction);
+      if (result.success) {
+        successCount++;
+      } else {
+        console.warn(`[Variant ${i + 1}] Failed: ${instruction.action} on "${instruction.target}" - ${result.error}`);
+        failCount++;
+      }
+    }
+
+    console.log(`[Plugin] Variant ${i + 1} (${variant.theme}): Applied ${successCount}/${variant.instructions.length} edits`);
+    figma.notify(`Variant ${i + 1}: ${variant.theme} (${successCount} edits)`, { timeout: 1500 });
+    framesToExport.push(clone as FrameNode | ComponentNode);
+  }
+
+  figma.ui.postMessage({
+    type: 'progress',
+    message: `Created ${variants.length} variants. Exporting ${framesToExport.length} frames...`
+  });
+
+  // Export all frames (original + variants)
+  const totalFrames = framesToExport.length;
+  for (let i = 0; i < totalFrames; i++) {
+    await exportFrame(framesToExport[i], i, totalFrames, format, scale);
+  }
+
+  figma.ui.postMessage({
+    type: 'all-exports-complete'
+  });
+}
+
+// ============================================
 // Message Handler
 // ============================================
 
@@ -760,6 +1190,7 @@ interface PluginMessage {
   format?: string;
   scale?: number;
   renames?: Array<{ id: string; newName: string }>;
+  variants?: EditVariant[];
 }
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
@@ -847,6 +1278,94 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to duplicate and export: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // ============================================
+  // Generate Edits Flow
+  // ============================================
+
+  // Step 1: Extract metadata for AI edit generation
+  if (msg.type === 'prepare-for-edits') {
+    try {
+      const selection = figma.currentPage.selection;
+      const frames = selection.filter(
+        node => node.type === 'FRAME' || node.type === 'COMPONENT'
+      ) as (FrameNode | ComponentNode)[];
+
+      if (frames.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Please select a frame to generate edits'
+        });
+        return;
+      }
+
+      figma.ui.postMessage({
+        type: 'progress',
+        message: 'Extracting layer metadata...'
+      });
+
+      const frame = frames[0];
+      const metadata = await extractLayerMetadataForEdits(frame);
+
+      console.log(`[Plugin] Extracted metadata for ${metadata.length} layers`);
+
+      figma.ui.postMessage({
+        type: 'metadata-for-edits',
+        frameId: frame.id,
+        frameName: frame.name,
+        frameWidth: frame.width,
+        frameHeight: frame.height,
+        layers: metadata
+      });
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to extract metadata: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // Step 2: Apply AI-generated edit variants to duplicated frames
+  if (msg.type === 'apply-edit-variants') {
+    try {
+      const selection = figma.currentPage.selection;
+      const frames = selection.filter(
+        node => node.type === 'FRAME' || node.type === 'COMPONENT'
+      ) as (FrameNode | ComponentNode)[];
+
+      if (frames.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Please select a frame to apply edits'
+        });
+        return;
+      }
+
+      if (!msg.variants || msg.variants.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'No variants to apply'
+        });
+        return;
+      }
+
+      console.log(`[Plugin] Applying ${msg.variants.length} edit variants`);
+
+      await applyEditVariants(
+        frames[0],
+        msg.variants,
+        msg.format || 'png',
+        msg.scale || 4
+      );
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Failed to apply edits: ' + (error as Error).message
       });
     }
     return;

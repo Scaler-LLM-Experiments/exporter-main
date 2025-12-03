@@ -175,6 +175,29 @@
     opacity: 0.6;
   }
 
+  /* Generate Edits Button Styles */
+  #generate-edits {
+    background: linear-gradient(135deg, hsl(30 80% 50%) 0%, hsl(45 80% 50%) 100%);
+    color: white;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    margin-bottom: 0.5rem;
+  }
+
+  #generate-edits:hover:not(:disabled) {
+    background: linear-gradient(135deg, hsl(30 80% 45%) 0%, hsl(45 80% 45%) 100%);
+  }
+
+  #generate-edits:active:not(:disabled) {
+    background: linear-gradient(135deg, hsl(30 80% 40%) 0%, hsl(45 80% 40%) 100%);
+  }
+
+  #generate-edits:disabled {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
   /* Progress Status */
   .progress-status {
     margin: 0 0 0.875rem 0;
@@ -280,6 +303,16 @@
   </svg>
   <span class="btn-text">AI Rename Layers</span>
 </button>
+<button id="generate-edits">
+  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
+  </svg>
+  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <span class="btn-text">Generate Edits (5 variants)</span>
+</button>
 <button id="export">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
@@ -300,6 +333,7 @@
 // ============================================
 const exportBtn = document.getElementById('export');
 const aiRenameBtn = document.getElementById('ai-rename');
+const generateEditsBtn = document.getElementById('generate-edits');
 const frameNameEl = document.getElementById('frame-name');
 const checkmarks = document.querySelectorAll('.checkmark');
 const progressStatus = document.getElementById('progress-status');
@@ -329,9 +363,13 @@ function setButtonState(button, state, text) {
   const btnText = button.querySelector('.btn-text');
   const spinnerIcon = button.querySelector('.spinner');
   const checkIcon = button.querySelector('.check-icon');
-  const defaultText = button.id === 'ai-rename'
-    ? 'AI Rename Layers'
-    : 'Export Only';
+
+  let defaultText = 'Export Only';
+  if (button.id === 'ai-rename') {
+    defaultText = 'AI Rename Layers';
+  } else if (button.id === 'generate-edits') {
+    defaultText = 'Generate Edits (5 variants)';
+  }
 
   switch(state) {
     case 'loading':
@@ -367,7 +405,7 @@ function hideProgress() {
 }
 
 // ============================================
-// Backend API Call
+// Backend API Calls
 // ============================================
 async function callRenamingAPI(layers) {
   const response = await fetch(`${BACKEND_URL}/api/rename-layers`, {
@@ -393,6 +431,39 @@ async function callRenamingAPI(layers) {
   return response.json();
 }
 
+async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers) {
+  const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      frameName,
+      frameWidth,
+      frameHeight,
+      layers: layers.map(l => ({
+        name: l.name,
+        type: l.type,
+        x: l.x,
+        y: l.y,
+        width: l.width,
+        height: l.height,
+        fills: l.fills,
+        strokes: l.strokes,
+        opacity: l.opacity,
+        text: l.text,
+        fontSize: l.fontSize,
+        cornerRadius: l.cornerRadius
+      }))
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `Server error: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 // ============================================
 // AI Rename Flow (decoupled from export)
 // ============================================
@@ -409,6 +480,27 @@ aiRenameBtn.onclick = async () => {
   } catch (e) {
     console.error('AI Rename error:', e);
     setButtonState(aiRenameBtn, 'default');
+    hideProgress();
+    alert('Error: ' + e.message);
+  }
+};
+
+// ============================================
+// Generate Edits Flow
+// ============================================
+generateEditsBtn.onclick = async () => {
+  console.log('Generate Edits button clicked');
+  try {
+    setButtonState(generateEditsBtn, 'loading', 'Preparing...');
+    showProgress('Extracting layer metadata...');
+
+    // Request layer metadata for edit generation
+    parent.postMessage({
+      pluginMessage: { type: 'prepare-for-edits' }
+    }, '*');
+  } catch (e) {
+    console.error('Generate Edits error:', e);
+    setButtonState(generateEditsBtn, 'default');
     hideProgress();
     alert('Error: ' + e.message);
   }
@@ -535,6 +627,56 @@ window.onmessage = async (event) => {
       setButtonState(aiRenameBtn, 'default');
       hideProgress();
     }, 2000);
+    return;
+  }
+
+  // ============================================
+  // Generate Edits Flow - Receive metadata and call AI
+  // ============================================
+  if (msg.type === 'metadata-for-edits') {
+    console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
+    try {
+      setButtonState(generateEditsBtn, 'loading', 'AI generating...');
+      showProgress(`Generating 5 creative variants for "${msg.frameName}"...`);
+
+      // Call backend to generate edit variants
+      const result = await callGenerateEditsAPI(
+        msg.frameName,
+        msg.frameWidth,
+        msg.frameHeight,
+        msg.layers
+      );
+
+      console.log('[UI] Generated variants:', result.variants.length);
+      result.variants.forEach((v, i) => {
+        console.log(`  Variant ${i + 1}: ${v.theme} - ${v.instructions.length} instructions`);
+        console.log(`    "${v.humanPrompt}"`);
+      });
+
+      // Send variants back to plugin to apply
+      setButtonState(generateEditsBtn, 'loading', 'Applying edits...');
+      showProgress(`Generated ${result.variants.length} variants. Applying edits and exporting...`);
+
+      parent.postMessage({
+        pluginMessage: {
+          type: 'apply-edit-variants',
+          variants: result.variants,
+          format: 'png',
+          scale: 4
+        }
+      }, '*');
+
+    } catch (error) {
+      console.error('[UI] Generate edits failed:', error);
+      setButtonState(generateEditsBtn, 'default');
+      hideProgress();
+
+      if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+        alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
+      } else {
+        alert('Generate edits failed: ' + error.message);
+      }
+    }
     return;
   }
 
@@ -741,9 +883,10 @@ window.onmessage = async (event) => {
   // All Exports Complete
   // ============================================
   if (msg.type === 'all-exports-complete') {
-    // Show success state in both buttons (whichever was active)
+    // Show success state in all buttons (whichever was active)
     setButtonState(exportBtn, 'success');
     setButtonState(aiRenameBtn, 'success');
+    setButtonState(generateEditsBtn, 'success');
     hideProgress();
   }
 
@@ -754,6 +897,7 @@ window.onmessage = async (event) => {
     alert(msg.message);
     setButtonState(exportBtn, 'default');
     setButtonState(aiRenameBtn, 'default');
+    setButtonState(generateEditsBtn, 'default');
     hideProgress();
   }
 };
