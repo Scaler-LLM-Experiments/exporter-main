@@ -3,6 +3,12 @@
 *.log.*
 node_modules
 
+# Environment files (API keys, secrets)
+.env
+.env.local
+.env.*.local
+server/.env
+
 out/
 dist/
 code.js
