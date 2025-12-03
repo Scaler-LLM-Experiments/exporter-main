@@ -10,6 +10,9 @@
     "figma"
   ],
   "ui": "ui.html",
+  "permissions": [
+    "currentuser"
+  ],
   "networkAccess": {
     "allowedDomains": [
       "https://cdnjs.cloudflare.com",
