@@ -560,22 +560,13 @@
   console.log('[UI] Backend URL:', BACKEND_URL);
 
   // Store user email (from input field)
-  let currentUserEmail = localStorage.getItem('figma-exporter-email') || '';
+  // Note: localStorage is disabled in Figma plugins (data: URLs)
+  let currentUserEmail = '';
 
-  // Load saved email into input field
-  if (currentUserEmail) {
-    userEmailInput.value = currentUserEmail;
-  }
-
-  // Save email to localStorage when it changes
+  // Update email when user types
   userEmailInput.addEventListener('input', (e) => {
     currentUserEmail = e.target.value.trim();
-    if (currentUserEmail) {
-      localStorage.setItem('figma-exporter-email', currentUserEmail);
-      console.log('[UI] Email saved:', currentUserEmail);
-    } else {
-      localStorage.removeItem('figma-exporter-email');
-    }
+    console.log('[UI] Email updated:', currentUserEmail || '(empty)');
   });
 
   // Store selected prompt file
