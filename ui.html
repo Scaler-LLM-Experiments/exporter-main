@@ -431,7 +431,7 @@ async function callRenamingAPI(layers) {
   return response.json();
 }
 
-async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers) {
+async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64) {
   const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -439,6 +439,7 @@ async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers) 
       frameName,
       frameWidth,
       frameHeight,
+      frameImageBase64,  // Include frame image for AI vision analysis
       layers: layers.map(l => ({
         name: l.name,
         type: l.type,
@@ -635,16 +636,18 @@ window.onmessage = async (event) => {
   // ============================================
   if (msg.type === 'metadata-for-edits') {
     console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
+    console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
     try {
-      setButtonState(generateEditsBtn, 'loading', 'AI generating...');
-      showProgress(`Generating 5 creative variants for "${msg.frameName}"...`);
+      setButtonState(generateEditsBtn, 'loading', 'AI analyzing...');
+      showProgress(`AI is analyzing "${msg.frameName}" to generate 5 creative variants...`);
 
-      // Call backend to generate edit variants
+      // Call backend to generate edit variants (with image for vision analysis)
       const result = await callGenerateEditsAPI(
         msg.frameName,
         msg.frameWidth,
         msg.frameHeight,
-        msg.layers
+        msg.layers,
+        msg.frameImageBase64
       );
 
       console.log('[UI] Generated variants:', result.variants.length);

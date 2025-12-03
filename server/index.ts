@@ -69,6 +69,7 @@ interface GenerateEditsRequest {
   frameName: string;
   frameWidth: number;
   frameHeight: number;
+  frameImageBase64?: string;  // Frame image for AI vision analysis
   layers: LayerMetadata[];
 }
 
@@ -300,7 +301,7 @@ app.post('/api/rename-layers', async (req: Request, res: Response) => {
 // ============================================
 app.post('/api/generate-edits', async (req: Request, res: Response) => {
   try {
-    const { frameName, frameWidth, frameHeight, layers }: GenerateEditsRequest = req.body;
+    const { frameName, frameWidth, frameHeight, frameImageBase64, layers }: GenerateEditsRequest = req.body;
 
     if (!layers || !Array.isArray(layers) || layers.length === 0) {
       res.status(400).json({ error: 'Invalid request: layers array required' });
@@ -311,14 +312,35 @@ app.post('/api/generate-edits', async (req: Request, res: Response) => {
     console.log(`Generating edits for frame "${frameName}"`);
     console.log(`Frame size: ${frameWidth} x ${frameHeight}`);
     console.log(`Layers: ${layers.length}`);
+    console.log(`Image included: ${frameImageBase64 ? `Yes (${Math.round(frameImageBase64.length / 1024)}KB)` : 'No'}`);
     console.log(`========================================\n`);
 
     // Build the prompt
     const userPrompt = buildEditPrompt(frameName, frameWidth, frameHeight, layers);
 
-    // Call Gemini
+    // Call Gemini with multimodal content (image + text) if image is available
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const result = await model.generateContent([EDIT_GENERATION_PROMPT, userPrompt]);
+
+    let result;
+    if (frameImageBase64) {
+      // Multimodal: Send image + system prompt + user prompt
+      console.log('Using multimodal mode (image + text)...');
+      result = await model.generateContent([
+        EDIT_GENERATION_PROMPT,
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: frameImageBase64
+          }
+        },
+        userPrompt
+      ]);
+    } else {
+      // Text-only mode (fallback)
+      console.log('Using text-only mode (no image)...');
+      result = await model.generateContent([EDIT_GENERATION_PROMPT, userPrompt]);
+    }
+
     const responseText = result.response.text();
 
     console.log('Raw Gemini response (first 1000 chars):');

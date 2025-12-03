@@ -1439,7 +1439,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       figma.ui.postMessage({
         type: 'progress',
-        message: 'Extracting layer metadata...'
+        message: 'Extracting layer metadata and frame image...'
       });
 
       const frame = frames[0];
@@ -1447,13 +1447,28 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
 
       console.log(`[Plugin] Extracted metadata for ${metadata.length} layers`);
 
+      // Export frame as 1x PNG for AI vision analysis
+      figma.ui.postMessage({
+        type: 'progress',
+        message: 'Capturing frame image for AI analysis...'
+      });
+
+      const frameImageBytes = await frame.exportAsync({
+        format: 'PNG',
+        constraint: { type: 'SCALE', value: 1 }
+      });
+      const frameImageBase64 = figma.base64Encode(frameImageBytes);
+
+      console.log(`[Plugin] Exported frame image (${Math.round(frameImageBase64.length / 1024)}KB)`);
+
       figma.ui.postMessage({
         type: 'metadata-for-edits',
         frameId: frame.id,
         frameName: frame.name,
         frameWidth: frame.width,
         frameHeight: frame.height,
-        layers: metadata
+        layers: metadata,
+        frameImageBase64: frameImageBase64
       });
     } catch (error) {
       figma.ui.postMessage({
