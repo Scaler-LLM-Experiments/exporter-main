@@ -33,7 +33,7 @@
 
   body {
     font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-    padding: 1.25rem;
+    padding: 0.875rem 1rem 1rem;
     margin: 0;
     background: hsl(var(--background));
     color: hsl(var(--foreground));
@@ -44,8 +44,8 @@
   }
 
   h2 {
-    margin: 0 0 0.375rem 0;
-    font-size: 16px;
+    margin: 0 0 0.25rem 0;
+    font-size: 15px;
     font-weight: 800;
     letter-spacing: 0.3em;
     color: hsl(var(--foreground));
@@ -53,7 +53,7 @@
   }
 
   .description {
-    margin: 0 0 0.875rem 0;
+    margin: 0 0 0.75rem 0;
     font-size: 11px;
     color: hsl(var(--muted-foreground));
     line-height: 1.4;
@@ -90,7 +90,7 @@
     width: 100%;
     padding: 0.5rem 1rem;
     margin-top: 0;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
     border: 1px solid transparent;
     border-radius: var(--radius);
     font-family: inherit;
@@ -102,7 +102,7 @@
     align-items: center;
     justify-content: center;
     white-space: nowrap;
-    height: 2.5rem;
+    height: 2.25rem;
   }
 
   button:last-child {
@@ -154,18 +154,18 @@
 
   /* AI Rename Button Styles */
   #ai-rename {
-    background: linear-gradient(135deg, hsl(250 60% 50%) 0%, hsl(280 60% 50%) 100%);
-    color: white;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   #ai-rename:hover:not(:disabled) {
-    background: linear-gradient(135deg, hsl(250 60% 45%) 0%, hsl(280 60% 45%) 100%);
+    background: hsl(var(--primary) / 0.9);
   }
 
   #ai-rename:active:not(:disabled) {
-    background: linear-gradient(135deg, hsl(250 60% 40%) 0%, hsl(280 60% 40%) 100%);
+    background: hsl(var(--primary) / 0.95);
   }
 
   #ai-rename:disabled {
@@ -175,66 +175,71 @@
     opacity: 0.6;
   }
 
-  /* Break Groups Button Styles */
-  #break-groups {
-    background: linear-gradient(135deg, hsl(180 60% 45%) 0%, hsl(200 60% 50%) 100%);
-    color: white;
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  /* Section Separator */
+  .section-separator {
+    margin: 1rem 0 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid hsl(var(--border));
+  }
+
+  .section-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: hsl(var(--muted-foreground));
     margin-bottom: 0.5rem;
   }
 
-  #break-groups:hover:not(:disabled) {
-    background: linear-gradient(135deg, hsl(180 60% 40%) 0%, hsl(200 60% 45%) 100%);
+  /* Secondary/Utility Button Styles (lower priority) */
+  .utility-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
   }
 
-  #break-groups:active:not(:disabled) {
-    background: linear-gradient(135deg, hsl(180 60% 35%) 0%, hsl(200 60% 40%) 100%);
-  }
-
-  #break-groups:disabled {
-    background: hsl(var(--muted));
+  .utility-button {
+    flex: 1;
+    background: hsl(var(--background));
     color: hsl(var(--muted-foreground));
+    border: 1px solid hsl(var(--border));
+    font-size: 0.75rem;
+    padding: 0.5rem 0.625rem;
+    height: 2rem;
+    font-weight: 500;
+  }
+
+  .utility-button:hover:not(:disabled) {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+    border-color: hsl(var(--foreground) / 0.2);
+  }
+
+  .utility-button:disabled {
+    opacity: 0.5;
     cursor: not-allowed;
-    opacity: 0.6;
   }
 
-  /* Rasterize Button Styles */
-  #rasterize {
-    background: linear-gradient(135deg, hsl(145 60% 42%) 0%, hsl(160 60% 45%) 100%);
-    color: white;
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    margin-bottom: 0.5rem;
-  }
-
-  #rasterize:hover:not(:disabled) {
-    background: linear-gradient(135deg, hsl(145 60% 37%) 0%, hsl(160 60% 40%) 100%);
-  }
-
-  #rasterize:active:not(:disabled) {
-    background: linear-gradient(135deg, hsl(145 60% 32%) 0%, hsl(160 60% 35%) 100%);
-  }
-
-  #rasterize:disabled {
-    background: hsl(var(--muted));
-    color: hsl(var(--muted-foreground));
-    cursor: not-allowed;
-    opacity: 0.6;
+  .utility-button .btn-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-right: 0.375rem;
   }
 
   /* Generate Edits Button Styles */
   #generate-edits {
-    background: linear-gradient(135deg, hsl(30 80% 50%) 0%, hsl(45 80% 50%) 100%);
-    color: white;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
     box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
 
   #generate-edits:hover:not(:disabled) {
-    background: linear-gradient(135deg, hsl(30 80% 45%) 0%, hsl(45 80% 45%) 100%);
+    background: hsl(var(--primary) / 0.9);
   }
 
   #generate-edits:active:not(:disabled) {
-    background: linear-gradient(135deg, hsl(30 80% 40%) 0%, hsl(45 80% 40%) 100%);
+    background: hsl(var(--primary) / 0.95);
   }
 
   #generate-edits:disabled {
@@ -260,41 +265,32 @@
     display: block;
   }
 
-  /* Frame Selector Styles */
-  .frame-selector {
-    margin: 0 0 1.5rem 0;
-    padding: 1.5rem;
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
-    display: flex;
-    flex-direction: column;
+  /* Frame Selection Tag */
+  .frame-tag {
+    display: inline-flex;
     align-items: center;
-    gap: 1rem;
-  }
-
-  .frame-icon {
-    color: hsl(var(--muted-foreground));
-    position: relative;
-  }
-
-  .frame-icon svg {
-    display: block;
-  }
-
-  .frame-icon .checkmark {
-    transition: opacity 200ms ease;
-  }
-
-  .frame-name {
-    font-size: 0.875rem;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    margin-bottom: 0.75rem;
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+    font-size: 0.8125rem;
     font-weight: 500;
-    color: hsl(var(--foreground));
-    text-align: center;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: hsl(var(--muted-foreground));
+    transition: all 200ms ease;
+  }
+
+  .frame-tag.has-selection {
+    background: hsl(var(--success) / 0.1);
+    border-color: hsl(var(--success) / 0.3);
+    color: hsl(var(--success));
+  }
+
+  .frame-tag-icon {
+    width: 1rem;
+    height: 1rem;
+    color: currentColor;
   }
 
   /* Button Icon Styles */
@@ -330,7 +326,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     padding: 0.5rem 0.75rem;
     border-radius: var(--radius);
     background: hsl(var(--muted) / 0.5);
@@ -366,7 +362,7 @@
 
   /* Select/Dropdown Styles */
   .select-container {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
   }
 
   .select-container label {
@@ -407,7 +403,7 @@
 
   /* Input Field Styles */
   .input-container {
-    margin: 0 0 1.5rem 0;
+    margin: 0 0 0.75rem 0;
   }
 
   .input-container label {
@@ -454,18 +450,11 @@
 
 <div class="progress-status" id="progress-status"></div>
 
-<div class="frame-selector">
-  <div class="frame-icon">
-    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="16" y="16" width="32" height="32" rx="4" stroke="currentColor" stroke-width="2" fill="none" />
-      <line x1="32" y1="16" x2="32" y2="48" stroke="currentColor" stroke-width="2" />
-      <line x1="16" y1="32" x2="48" y2="32" stroke="currentColor" stroke-width="2" />
-      <circle class="checkmark hidden" cx="48" cy="16" r="10" fill="hsl(var(--success))" />
-      <path class="checkmark hidden" d="M 44 16 L 47 19 L 52 13" stroke="white" stroke-width="2" stroke-linecap="round"
-        stroke-linejoin="round" fill="none" />
-    </svg>
-  </div>
-  <div class="frame-name" id="frame-name">Select Frame to Export</div>
+<div class="frame-tag" id="frame-tag">
+  <svg class="frame-tag-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <rect x="3" y="3" width="10" height="10" rx="1" />
+  </svg>
+  <span id="frame-count">No frames selected</span>
 </div>
 
 <div class="input-container">
@@ -473,26 +462,45 @@
   <input type="email" id="user-email" placeholder="your.email@example.com" />
 </div>
 
-<button id="break-groups">
-  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
-    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
-  </svg>
-  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
-  </svg>
-  <span class="btn-text">Break Groups Apart</span>
-</button>
-<button id="rasterize">
-  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
-    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
-  </svg>
-  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
-  </svg>
-  <span class="btn-text">Rasterize Selection (4x)</span>
-</button>
+<div class="section-separator">
+  <div class="section-label">Utility Tools</div>
+</div>
+
+<div class="utility-buttons">
+  <button id="break-groups" class="utility-button">
+    <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+      <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
+    </svg>
+    <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+    <span class="btn-text">Break Groups</span>
+  </button>
+  <button id="rasterize" class="utility-button">
+    <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+      <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
+    </svg>
+    <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+    <span class="btn-text">Rasterize (4x)</span>
+  </button>
+</div>
+
+<div class="select-container">
+  <label for="prompt-selector">AI Prompt Style</label>
+  <select id="prompt-selector">
+    <option value="">Loading prompts...</option>
+  </select>
+</div>
+
+<div class="checkbox-container" onclick="document.getElementById('generate-images').click(); event.stopPropagation();">
+  <input type="checkbox" id="generate-images" onclick="event.stopPropagation();">
+  <label for="generate-images">Generate AI Images</label>
+</div>
+
 <button id="ai-rename">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -503,17 +511,6 @@
   </svg>
   <span class="btn-text">AI Rename Layers</span>
 </button>
-<div class="checkbox-container" onclick="document.getElementById('generate-images').click(); event.stopPropagation();">
-  <input type="checkbox" id="generate-images" onclick="event.stopPropagation();">
-  <label for="generate-images">Generate AI Images</label>
-  <span class="checkbox-hint">Requires OpenRouter</span>
-</div>
-<div class="select-container">
-  <label for="prompt-selector">AI Prompt Style</label>
-  <select id="prompt-selector">
-    <option value="">Loading prompts...</option>
-  </select>
-</div>
 <button id="generate-edits">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -547,8 +544,8 @@
   const generateEditsBtn = document.getElementById('generate-edits');
   const breakGroupsBtn = document.getElementById('break-groups');
   const rasterizeBtn = document.getElementById('rasterize');
-  const frameNameEl = document.getElementById('frame-name');
-  const checkmarks = document.querySelectorAll('.checkmark');
+  const frameCountEl = document.getElementById('frame-count');
+  const frameTagEl = document.getElementById('frame-tag');
   const progressStatus = document.getElementById('progress-status');
   const promptSelector = document.getElementById('prompt-selector');
   const userEmailInput = document.getElementById('user-email');
@@ -604,9 +601,9 @@
     } else if (button.id === 'generate-edits') {
       defaultText = 'Generate Edits (5 variants)';
     } else if (button.id === 'break-groups') {
-      defaultText = 'Break Groups Apart';
+      defaultText = 'Break Groups';
     } else if (button.id === 'rasterize') {
-      defaultText = 'Rasterize Selection (4x)';
+      defaultText = 'Rasterize (4x)';
     }
 
     switch (state) {
@@ -882,11 +879,12 @@
     // ============================================
     if (msg.type === 'selection-change') {
       if (msg.hasFrame) {
-        frameNameEl.textContent = msg.frameName;
-        checkmarks.forEach(checkmark => checkmark.classList.remove('hidden'));
+        const frameCount = msg.frameCount || 1;
+        frameCountEl.textContent = frameCount === 1 ? '1 frame selected' : `${frameCount} frames selected`;
+        frameTagEl.classList.add('has-selection');
       } else {
-        frameNameEl.textContent = 'Select Frame to Export';
-        checkmarks.forEach(checkmark => checkmark.classList.add('hidden'));
+        frameCountEl.textContent = 'No frames selected';
+        frameTagEl.classList.remove('has-selection');
       }
       return;
     }

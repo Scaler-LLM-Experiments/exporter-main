@@ -1,7 +1,7 @@
 // Frame Exporter Plugin
 // Exports a selected frame with all its layers as PNGs and metadata as JSON
 
-figma.showUI(__html__, { width: 560, height: 560 });
+figma.showUI(__html__, { width: 320, height: 600 });
 
 // Send initial selection state
 function updateSelectionState() {
