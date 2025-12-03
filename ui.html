@@ -823,11 +823,11 @@
     console.log('Generate Edits button clicked');
     try {
       setButtonState(generateEditsBtn, 'loading', 'Preparing...');
-      showProgress('Extracting layer metadata...');
+      showProgress('Checking selection...');
 
-      // Request layer metadata for edit generation
+      // Request frame count check first
       parent.postMessage({
-        pluginMessage: { type: 'prepare-for-edits' }
+        pluginMessage: { type: 'check-frames-for-edits' }
       }, '*');
     } catch (e) {
       console.error('Generate Edits error:', e);
@@ -966,46 +966,105 @@
     }
 
     // ============================================
+    // Generate Edits Flow - Frame count check
+    // ============================================
+    if (msg.type === 'frames-count-for-edits') {
+      const frameCount = msg.frameCount || 1;
+
+      hideProgress();
+      setButtonState(generateEditsBtn, 'default');
+
+      if (frameCount === 0) {
+        alert('Please select at least one frame to generate variants.');
+        return;
+      }
+
+      // If multiple frames, ask for confirmation
+      if (frameCount > 1) {
+        const totalVariants = frameCount * 5;
+        const confirmed = confirm(
+          `You have ${frameCount} frames selected.\n\n` +
+          `This will generate ${totalVariants} total variants (5 for each frame).\n\n` +
+          `This may take several minutes and will use more AI credits.\n\n` +
+          `Do you want to continue?`
+        );
+
+        if (!confirmed) {
+          console.log('[UI] User cancelled multi-frame variant generation');
+          return;
+        }
+      }
+
+      // User confirmed or single frame - proceed
+      console.log(`[UI] Proceeding with ${frameCount} frame(s)`);
+      setButtonState(generateEditsBtn, 'loading', 'Preparing...');
+      showProgress('Extracting layer metadata...');
+
+      parent.postMessage({
+        pluginMessage: { type: 'prepare-for-edits', processAllFrames: true }
+      }, '*');
+
+      return;
+    }
+
+    // ============================================
     // Generate Edits Flow - Receive metadata and call AI
     // ============================================
     if (msg.type === 'metadata-for-edits') {
-      console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
-      console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
+      const frames = msg.frames || [];
+      const totalFrames = msg.totalFrames || frames.length;
+
+      console.log(`[UI] Received metadata for ${totalFrames} frame(s)`);
+
       try {
         // Check if image generation is enabled
         const generateImagesCheckbox = document.getElementById('generate-images');
         const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
 
-        setButtonState(generateEditsBtn, 'loading', 'AI analyzing...');
-        const progressMsg = generateImages
-          ? `AI is analyzing "${msg.frameName}" to generate 5 creative variants with AI images...`
-          : `AI is analyzing "${msg.frameName}" to generate 5 creative variants...`;
-        showProgress(progressMsg);
+        // Process each frame sequentially
+        const allFrameVariants = [];
 
-        // Call backend to generate edit variants (with image for vision analysis)
-        const result = await callGenerateEditsAPI(
-          msg.frameName,
-          msg.frameWidth,
-          msg.frameHeight,
-          msg.layers,
-          msg.frameImageBase64,
-          generateImages
-        );
+        for (let i = 0; i < frames.length; i++) {
+          const frame = frames[i];
+          console.log(`[UI] Processing frame ${i + 1}/${totalFrames}: ${frame.frameName}`);
 
-        console.log('[UI] Generated variants:', result.variants.length);
-        result.variants.forEach((v, i) => {
-          console.log(`  Variant ${i + 1}: ${v.theme} - ${v.instructions.length} instructions`);
-          console.log(`    "${v.humanPrompt}"`);
-        });
+          setButtonState(generateEditsBtn, 'loading', `AI analyzing ${i + 1}/${totalFrames}...`);
+          const progressMsg = generateImages
+            ? `AI analyzing frame ${i + 1}/${totalFrames}: "${frame.frameName}" (with AI images)...`
+            : `AI analyzing frame ${i + 1}/${totalFrames}: "${frame.frameName}"...`;
+          showProgress(progressMsg);
 
-        // Send variants back to plugin to apply
+          // Call backend to generate edit variants
+          const result = await callGenerateEditsAPI(
+            frame.frameName,
+            frame.frameWidth,
+            frame.frameHeight,
+            frame.layers,
+            frame.frameImageBase64,
+            generateImages
+          );
+
+          console.log(`[UI] Generated ${result.variants.length} variants for ${frame.frameName}`);
+
+          // Store variants with frame ID for later association
+          allFrameVariants.push({
+            frameId: frame.frameId,
+            frameName: frame.frameName,
+            variants: result.variants
+          });
+        }
+
+        console.log(`[UI] Total: ${allFrameVariants.length} frame(s) processed, ${allFrameVariants.reduce((sum, f) => sum + f.variants.length, 0)} total variants`);
+
+        // Send all variants back to plugin to apply
         setButtonState(generateEditsBtn, 'loading', 'Applying edits...');
-        showProgress(`Generated ${result.variants.length} variants. Applying edits to canvas...`);
+        showProgress(`Generated variants for ${totalFrames} frame(s). Applying edits to canvas...`);
 
         parent.postMessage({
           pluginMessage: {
             type: 'apply-edit-variants',
-            variants: result.variants
+            frameVariants: allFrameVariants,
+            totalFrames: totalFrames
           }
         }, '*');
 
@@ -1163,7 +1222,9 @@
           reconstructedBlob,
           format: exportFormat,
           frameIndex: msg.frameIndex,
-          totalFrames: msg.totalFrames
+          totalFrames: msg.totalFrames,
+          aiPromptTheme: msg.aiPromptTheme,
+          aiPromptInstructions: msg.aiPromptInstructions
         });
 
         console.log(`[UI] Collected frame ${msg.frameIndex + 1}/${msg.totalFrames}: ${msg.folderName}`);
@@ -1259,6 +1320,24 @@
             `${frameData.folderName}/${frameData.meta.component.name}_reconstructed${reconstructedExt}`,
             frameData.reconstructedBlob
           );
+
+          // Add AI prompt text file if available (from generated variants)
+          if (frameData.aiPromptTheme || frameData.aiPromptInstructions) {
+            let promptContent = '';
+
+            // Add theme description
+            if (frameData.aiPromptTheme) {
+              promptContent += frameData.aiPromptTheme + '\n\n';
+            }
+
+            // Add detailed instructions
+            if (frameData.aiPromptInstructions) {
+              promptContent += frameData.aiPromptInstructions;
+            }
+
+            zip.file(`${frameData.folderName}/prompt.txt`, promptContent.trim());
+            console.log(`[UI] Added AI prompt to frame ${i + 1}`);
+          }
 
           console.log(`[UI] Added frame ${i + 1}/${totalFrames} to ZIP: ${frameData.folderName}`);
         }

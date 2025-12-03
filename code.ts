@@ -668,6 +668,10 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
     scale
   };
 
+  // Retrieve AI prompt if it exists (from generated variants)
+  const aiPromptTheme = frame.getPluginData('aiPromptTheme');
+  const aiPromptInstructions = frame.getPluginData('aiPromptInstructions');
+
   // Send data to UI for ZIP creation
   figma.ui.postMessage({
     type: 'export-data',
@@ -676,7 +680,9 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
     layers: exportedLayers,
     frameIndex,
     totalFrames,
-    format
+    format,
+    aiPromptTheme: aiPromptTheme || undefined,
+    aiPromptInstructions: aiPromptInstructions || undefined
   });
 }
 
@@ -2029,7 +2035,7 @@ function formatInstructionsAsParagraph(instructions: EditInstruction[]): string 
   return allButLast.charAt(0).toUpperCase() + allButLast.slice(1) + ', and ' + last + '.';
 }
 
-// Helper to create a styled label card above a frame (top-left position)
+// Helper to create a styled label card to the left of a frame with 100px gap
 async function createPromptLabel(
   frame: FrameNode | ComponentNode,
   theme: string,
@@ -2132,12 +2138,12 @@ async function createPromptLabel(
     labelFrame.appendChild(changesLabel);
     labelFrame.appendChild(instructionsText);
 
-    // Position above and to the left of the frame
-    labelFrame.x = frame.x;
-    labelFrame.y = frame.y - labelFrame.height - 32; // 32px gap above frame
+    // Position to the left of the frame with 100px gap
+    labelFrame.x = frame.x - labelFrame.width - 100; // 100px gap to the left
+    labelFrame.y = frame.y; // Aligned with top of frame
 
-    // Return the height of the label card for spacing calculations
-    return labelFrame.height + 32; // Include the gap
+    // Return the height of the label card (not used for horizontal layout)
+    return labelFrame.height;
   } catch (error) {
     console.warn('Could not create prompt label:', error);
     return 0;
@@ -2158,11 +2164,10 @@ async function applyEditVariants(
 
   // Spacing configuration
   const VERTICAL_SPACING = 500; // 500px between variant frames
-  const LABEL_ESTIMATED_HEIGHT = 250; // Estimated height for the label card above each frame
 
   // Track cumulative Y position for vertical stacking
-  // Add extra space for the first variant's label that will appear above it
-  let currentY = originalFrame.y + originalFrame.height + VERTICAL_SPACING + LABEL_ESTIMATED_HEIGHT;
+  // Labels are now positioned to the left, so no extra vertical space needed
+  let currentY = originalFrame.y + originalFrame.height + VERTICAL_SPACING;
 
   // Create duplicates and apply different edits to each
   for (let i = 0; i < variants.length; i++) {
@@ -2198,10 +2203,16 @@ async function applyEditVariants(
 
     console.log(`[Plugin] Variant ${i + 1} (${variant.theme}): Applied ${successCount}/${variant.instructions.length} edits`);
 
-    // Create styled prompt label card above the variant frame
+    // Create styled prompt label card to the left of the variant frame
     // Use readableInstructions from AI, fallback to formatted paragraph if not available
     const readableText = variant.readableInstructions || formatInstructionsAsParagraph(variant.instructions);
-    const labelHeight = await createPromptLabel(
+
+    // Store BOTH parts of the AI prompt in pluginData for later export
+    clone.setPluginData('aiPromptTheme', variant.humanPrompt);
+    clone.setPluginData('aiPromptInstructions', readableText);
+
+    // Create prompt label to the left of the variant frame
+    await createPromptLabel(
       clone,
       variant.theme,
       variant.humanPrompt,
@@ -2209,24 +2220,13 @@ async function applyEditVariants(
       variant.instructions.length
     );
 
-    // Calculate next Y position: frame height + spacing + estimated label height for next variant
-    currentY = clone.y + clone.height + VERTICAL_SPACING + LABEL_ESTIMATED_HEIGHT;
+    // Calculate next Y position: frame height + spacing
+    currentY = clone.y + clone.height + VERTICAL_SPACING;
 
     figma.notify(`Variant ${i + 1}: ${variant.theme} (${successCount} edits)`, { timeout: 1500 });
   }
 
-  figma.ui.postMessage({
-    type: 'progress',
-    message: `Created ${variants.length} variants with labels. Select frames and use Export to download.`
-  });
-
-  // Send completion message (no export)
-  figma.ui.postMessage({
-    type: 'variants-created',
-    variantCount: variants.length
-  });
-
-  figma.notify(`Created ${variants.length} variants! Use "Export Only" to download.`, { timeout: 4000 });
+  console.log(`[Plugin] Successfully created ${variants.length} variants for ${originalFrame.name}`);
 }
 
 // ============================================
@@ -2525,6 +2525,20 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   // Generate Edits Flow
   // ============================================
 
+  // Check frame count for multi-frame confirmation
+  if (msg.type === 'check-frames-for-edits') {
+    const selection = figma.currentPage.selection;
+    const frames = selection.filter(
+      node => node.type === 'FRAME' || node.type === 'COMPONENT'
+    ) as (FrameNode | ComponentNode)[];
+
+    figma.ui.postMessage({
+      type: 'frames-count-for-edits',
+      frameCount: frames.length
+    });
+    return;
+  }
+
   // Step 1: Extract metadata for AI edit generation
   if (msg.type === 'prepare-for-edits') {
     try {
@@ -2541,38 +2555,51 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      figma.ui.postMessage({
-        type: 'progress',
-        message: 'Extracting layer metadata and frame image...'
-      });
+      const processAllFrames = msg.processAllFrames === true;
+      const framesToProcess = processAllFrames ? frames : [frames[0]];
 
-      const frame = frames[0];
-      const metadata = await extractLayerMetadataForEdits(frame);
+      console.log(`[Plugin] Processing ${framesToProcess.length} frame(s) for edit generation`);
 
-      console.log(`[Plugin] Extracted metadata for ${metadata.length} layers`);
+      // Extract metadata for each frame
+      const allFrameData = [];
+      for (let i = 0; i < framesToProcess.length; i++) {
+        const frame = framesToProcess[i];
 
-      // Export frame as 1x PNG for AI vision analysis
-      figma.ui.postMessage({
-        type: 'progress',
-        message: 'Capturing frame image for AI analysis...'
-      });
+        figma.ui.postMessage({
+          type: 'progress',
+          message: `Extracting metadata from frame ${i + 1}/${framesToProcess.length}: ${frame.name}...`
+        });
 
-      const frameImageBytes = await frame.exportAsync({
-        format: 'PNG',
-        constraint: { type: 'SCALE', value: 1 }
-      });
-      const frameImageBase64 = figma.base64Encode(frameImageBytes);
+        const metadata = await extractLayerMetadataForEdits(frame);
+        console.log(`[Plugin] Extracted metadata for ${metadata.length} layers from ${frame.name}`);
 
-      console.log(`[Plugin] Exported frame image (${Math.round(frameImageBase64.length / 1024)}KB)`);
+        // Export frame as 1x PNG for AI vision analysis
+        figma.ui.postMessage({
+          type: 'progress',
+          message: `Capturing frame ${i + 1}/${framesToProcess.length} image...`
+        });
 
+        const frameImageBytes = await frame.exportAsync({
+          format: 'PNG',
+          constraint: { type: 'SCALE', value: 1 }
+        });
+        const frameImageBase64 = figma.base64Encode(frameImageBytes);
+
+        allFrameData.push({
+          frameId: frame.id,
+          frameName: frame.name,
+          frameWidth: frame.width,
+          frameHeight: frame.height,
+          layers: metadata,
+          frameImageBase64: frameImageBase64
+        });
+      }
+
+      // Send all frame data to UI for AI processing
       figma.ui.postMessage({
         type: 'metadata-for-edits',
-        frameId: frame.id,
-        frameName: frame.name,
-        frameWidth: frame.width,
-        frameHeight: frame.height,
-        layers: metadata,
-        frameImageBase64: frameImageBase64
+        frames: allFrameData,
+        totalFrames: allFrameData.length
       });
     } catch (error) {
       figma.ui.postMessage({
@@ -2599,7 +2626,10 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      if (!msg.variants || msg.variants.length === 0) {
+      // Handle both single frame (old format) and multi-frame (new format)
+      const frameVariants = msg.frameVariants || [{ frameId: frames[0].id, variants: msg.variants || [] }];
+
+      if (frameVariants.length === 0) {
         figma.ui.postMessage({
           type: 'error',
           message: 'No variants to apply'
@@ -2607,12 +2637,37 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      console.log(`[Plugin] Applying ${msg.variants.length} edit variants`);
+      console.log(`[Plugin] Applying variants for ${frameVariants.length} frame(s)`);
 
-      await applyEditVariants(
-        frames[0],
-        msg.variants
-      );
+      // Process each frame's variants
+      for (let i = 0; i < frameVariants.length; i++) {
+        const fv = frameVariants[i];
+
+        // Find the frame by ID
+        const frame = frames.find(f => f.id === fv.frameId);
+        if (!frame) {
+          console.warn(`[Plugin] Frame with ID ${fv.frameId} not found in selection`);
+          continue;
+        }
+
+        figma.ui.postMessage({
+          type: 'progress',
+          message: `Applying variants ${i + 1}/${frameVariants.length}: ${frame.name}...`
+        });
+
+        await applyEditVariants(frame, fv.variants);
+      }
+
+      // Send success message
+      const totalVariants = frameVariants.reduce((sum, fv) => sum + (fv.variants?.length || 0), 0);
+      figma.ui.postMessage({
+        type: 'variants-created',
+        variantCount: totalVariants,
+        frameCount: frameVariants.length
+      });
+
+      figma.notify(`Created ${totalVariants} variants for ${frameVariants.length} frame(s)! Use "Export Only" to download.`, { timeout: 4000 });
+
     } catch (error) {
       figma.ui.postMessage({
         type: 'error',
