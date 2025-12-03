@@ -132,6 +132,12 @@ interface EditInstruction {
   // Gradient
   colors?: string[];        // For addGradient
   gradientAngle?: number;   // For addGradient
+  // Text Transform
+  textCase?: 'upper' | 'lower' | 'title' | 'original';  // For changeTextCase
+  // Inner Shadow
+  inset?: boolean;          // For addInnerShadow (use with shadow params)
+  // Background Blur
+  backgroundBlur?: number;  // For addBackgroundBlur (glassmorphism)
 }
 
 interface EditVariant {
@@ -993,6 +999,20 @@ async function executeEditInstruction(
         return executeChangeBlendMode(layer, instruction);
       case 'addGradient':
         return executeAddGradient(layer, instruction);
+      case 'changeTextCase':
+        return await executeChangeTextCase(layer, instruction);
+      case 'addInnerShadow':
+        return executeAddInnerShadow(layer, instruction);
+      case 'addBackgroundBlur':
+        return executeAddBackgroundBlur(layer, instruction);
+      case 'show':
+        return executeShow(layer, instruction);
+      case 'removeFill':
+        return executeRemoveFill(layer, instruction);
+      case 'addStroke':
+        return executeAddStroke(layer, instruction);
+      case 'removeStroke':
+        return executeRemoveStroke(layer, instruction);
       default:
         return { success: false, error: `Unknown action: ${instruction.action}` };
     }
@@ -1626,6 +1646,180 @@ function executeAddGradient(
 
   node.fills = [gradientFill];
   console.log(`  Added gradient with ${instruction.colors.length} colors`);
+  return { success: true };
+}
+
+// Change text case (uppercase, lowercase, title case)
+async function executeChangeTextCase(
+  layer: SceneNode,
+  instruction: EditInstruction
+): Promise<{ success: boolean; error?: string }> {
+  if (layer.type !== 'TEXT') {
+    return { success: false, error: 'Layer is not a text node' };
+  }
+  if (!instruction.textCase) {
+    return { success: false, error: 'changeTextCase requires textCase parameter' };
+  }
+
+  const textNode = layer as TextNode;
+
+  try {
+    // Load font before modifying
+    const fontName = textNode.fontName;
+    if (fontName !== figma.mixed) {
+      await figma.loadFontAsync(fontName);
+    }
+
+    const currentText = textNode.characters;
+    let newText: string;
+
+    switch (instruction.textCase) {
+      case 'upper':
+        newText = currentText.toUpperCase();
+        break;
+      case 'lower':
+        newText = currentText.toLowerCase();
+        break;
+      case 'title':
+        newText = currentText.replace(/\w\S*/g, txt =>
+          txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
+        );
+        break;
+      default:
+        newText = currentText;
+    }
+
+    textNode.characters = newText;
+    console.log(`  Changed text case to ${instruction.textCase}: "${newText}"`);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: `Failed to change text case: ${(error as Error).message}` };
+  }
+}
+
+// Add inner shadow (inset shadow for depth)
+function executeAddInnerShadow(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('effects' in layer)) {
+    return { success: false, error: 'Layer does not support effects' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  const color = instruction.color ? hexToRgb(instruction.color) : null;
+  const rgb = color ?? { r: 0, g: 0, b: 0 };
+
+  const innerShadow: InnerShadowEffect = {
+    type: 'INNER_SHADOW',
+    color: { r: rgb.r, g: rgb.g, b: rgb.b, a: instruction.opacity ?? 0.25 },
+    offset: { x: instruction.shadowX ?? 0, y: instruction.shadowY ?? 2 },
+    radius: instruction.blur ?? 4,
+    spread: instruction.spread ?? 0,
+    visible: true,
+    blendMode: 'NORMAL'
+  };
+
+  node.effects = [...node.effects, innerShadow];
+  console.log(`  Added inner shadow`);
+  return { success: true };
+}
+
+// Add background blur (for glassmorphism effects)
+function executeAddBackgroundBlur(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('effects' in layer)) {
+    return { success: false, error: 'Layer does not support effects' };
+  }
+  if (instruction.backgroundBlur === undefined) {
+    return { success: false, error: 'addBackgroundBlur requires backgroundBlur amount' };
+  }
+
+  const node = layer as FrameNode | RectangleNode;
+
+  const bgBlur: Effect = {
+    type: 'BACKGROUND_BLUR',
+    radius: instruction.backgroundBlur,
+    visible: true
+  } as Effect;
+
+  node.effects = [...node.effects, bgBlur];
+  console.log(`  Added background blur (${instruction.backgroundBlur}px)`);
+  return { success: true };
+}
+
+// Show a hidden layer (opposite of hide)
+function executeShow(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if ('visible' in layer) {
+    layer.visible = true;
+    console.log(`  Made layer visible`);
+    return { success: true };
+  }
+  return { success: false, error: 'Layer does not support visibility' };
+}
+
+// Remove all fills from a layer
+function executeRemoveFill(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('fills' in layer)) {
+    return { success: false, error: 'Layer does not support fills' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  node.fills = [];
+  console.log(`  Removed all fills`);
+  return { success: true };
+}
+
+// Add stroke to a layer
+function executeAddStroke(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('strokes' in layer)) {
+    return { success: false, error: 'Layer does not support strokes' };
+  }
+  if (!instruction.color) {
+    return { success: false, error: 'addStroke requires color' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  const color = hexToRgb(instruction.color);
+  if (!color) {
+    return { success: false, error: 'Invalid color format' };
+  }
+
+  const stroke: SolidPaint = {
+    type: 'SOLID',
+    color: { r: color.r, g: color.g, b: color.b },
+    opacity: instruction.opacity ?? 1
+  };
+
+  node.strokes = [...node.strokes, stroke];
+  node.strokeWeight = instruction.weight ?? 1;
+  console.log(`  Added stroke ${instruction.color}`);
+  return { success: true };
+}
+
+// Remove all strokes from a layer
+function executeRemoveStroke(
+  layer: SceneNode,
+  _instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('strokes' in layer)) {
+    return { success: false, error: 'Layer does not support strokes' };
+  }
+
+  const node = layer as RectangleNode | FrameNode | TextNode;
+  node.strokes = [];
+  console.log(`  Removed all strokes`);
   return { success: true };
 }
 

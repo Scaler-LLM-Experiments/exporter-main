@@ -349,30 +349,70 @@ app.post('/api/generate-edits', async (req: Request, res: Response) => {
     // Build the prompt
     const userPrompt = buildEditPrompt(frameName, frameWidth, frameHeight, layers);
 
-    // Call Gemini with multimodal content (image + text) if image is available
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    // Use Gemini 3 Pro with thinking enabled for better design reasoning
+    // Thinking allows the model to reason about color harmony, visual balance,
+    // typography choices before generating JSON instructions
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-pro-preview',
+      generationConfig: {
+        // @ts-expect-error - thinkingConfig is a new feature
+        thinkingConfig: {
+          thinkingLevel: 'high',  // Maximum reasoning depth for design decisions
+          includeThoughts: true   // Include thinking in response for streaming
+        }
+      }
+    });
 
-    let result;
-    if (frameImageBase64) {
-      // Multimodal: Send image + system prompt + user prompt
-      console.log('Using multimodal mode (image + text)...');
-      result = await model.generateContent([
-        EDIT_GENERATION_PROMPT,
-        {
-          inlineData: {
-            mimeType: 'image/png',
-            data: frameImageBase64
+    // Build content array
+    const contentParts = frameImageBase64
+      ? [
+          EDIT_GENERATION_PROMPT,
+          { inlineData: { mimeType: 'image/png', data: frameImageBase64 } },
+          userPrompt
+        ]
+      : [EDIT_GENERATION_PROMPT, userPrompt];
+
+    console.log('Using Gemini 3 Pro with thinking (streaming mode)...');
+    console.log('Thinking level: HIGH (maximum reasoning depth)');
+    console.log('\n💭 Model thinking...\n');
+    console.log('─'.repeat(60));
+
+    // Use streaming to show thinking in real-time
+    const streamResult = await model.generateContentStream(contentParts);
+
+    let responseText = '';
+    let thinkingText = '';
+    let isFirstThinking = true;
+
+    // Stream through chunks
+    for await (const chunk of streamResult.stream) {
+      const candidates = chunk.candidates;
+      if (!candidates || candidates.length === 0) continue;
+
+      for (const part of candidates[0].content.parts) {
+        // @ts-expect-error - thought property exists on thinking-enabled responses
+        if (part.thought) {
+          // This is thinking content - stream to console
+          const thought = part.text || '';
+          if (thought) {
+            if (isFirstThinking) {
+              process.stdout.write('\x1b[36m'); // Cyan color for thinking
+              isFirstThinking = false;
+            }
+            process.stdout.write(thought);
+            thinkingText += thought;
           }
-        },
-        userPrompt
-      ]);
-    } else {
-      // Text-only mode (fallback)
-      console.log('Using text-only mode (no image)...');
-      result = await model.generateContent([EDIT_GENERATION_PROMPT, userPrompt]);
+        } else if (part.text) {
+          // This is the actual response
+          responseText += part.text;
+        }
+      }
     }
 
-    const responseText = result.response.text();
+    // Reset color and add separator
+    process.stdout.write('\x1b[0m\n');
+    console.log('─'.repeat(60));
+    console.log(`\n✅ Thinking complete (${thinkingText.length} chars)\n`);
 
     console.log('Raw Gemini response (first 1000 chars):');
     console.log(responseText.substring(0, 1000));
@@ -406,11 +446,12 @@ app.listen(PORT, () => {
 
 Endpoints:
   GET  /health              - Health check
-  POST /api/rename-layers   - Rename layers using AI
-  POST /api/generate-edits  - Generate 5 design variations
+  POST /api/rename-layers   - Rename layers using AI (gemini-2.5-flash-lite)
+  POST /api/generate-edits  - Generate 5 design variations (gemini-3-pro + thinking)
 
 Config:
   Edit prompt file: ${promptFileName}
+  Thinking level: HIGH (maximum reasoning depth)
   (Set EDIT_PROMPT_FILE env var to use a different prompt)
 
 Ready to receive requests from Figma plugin.

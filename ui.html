@@ -266,8 +266,13 @@
   }
 
   @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .hidden {
@@ -283,11 +288,12 @@
 <div class="frame-selector">
   <div class="frame-icon">
     <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="16" y="16" width="32" height="32" rx="4" stroke="currentColor" stroke-width="2" fill="none"/>
-      <line x1="32" y1="16" x2="32" y2="48" stroke="currentColor" stroke-width="2"/>
-      <line x1="16" y1="32" x2="48" y2="32" stroke="currentColor" stroke-width="2"/>
-      <circle class="checkmark hidden" cx="48" cy="16" r="10" fill="hsl(var(--success))"/>
-      <path class="checkmark hidden" d="M 44 16 L 47 19 L 52 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <rect x="16" y="16" width="32" height="32" rx="4" stroke="currentColor" stroke-width="2" fill="none" />
+      <line x1="32" y1="16" x2="32" y2="48" stroke="currentColor" stroke-width="2" />
+      <line x1="16" y1="32" x2="48" y2="32" stroke="currentColor" stroke-width="2" />
+      <circle class="checkmark hidden" cx="48" cy="16" r="10" fill="hsl(var(--success))" />
+      <path class="checkmark hidden" d="M 44 16 L 47 19 L 52 13" stroke="white" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round" fill="none" />
     </svg>
   </div>
   <div class="frame-name" id="frame-name">Select Frame to Export</div>
@@ -295,31 +301,31 @@
 
 <button id="ai-rename">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
-    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
   </svg>
   <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
   </svg>
   <span class="btn-text">AI Rename Layers</span>
 </button>
 <button id="generate-edits">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
-    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
   </svg>
   <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
   </svg>
   <span class="btn-text">Generate Edits (5 variants)</span>
 </button>
 <button id="export">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <circle cx="8" cy="8" r="6" stroke-opacity="0.25"/>
-    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round"/>
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
   </svg>
   <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
   </svg>
   <span class="btn-text">Export Only</span>
 </button>
@@ -328,587 +334,587 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 
-// ============================================
-// DOM Elements
-// ============================================
-const exportBtn = document.getElementById('export');
-const aiRenameBtn = document.getElementById('ai-rename');
-const generateEditsBtn = document.getElementById('generate-edits');
-const frameNameEl = document.getElementById('frame-name');
-const checkmarks = document.querySelectorAll('.checkmark');
-const progressStatus = document.getElementById('progress-status');
+  // ============================================
+  // DOM Elements
+  // ============================================
+  const exportBtn = document.getElementById('export');
+  const aiRenameBtn = document.getElementById('ai-rename');
+  const generateEditsBtn = document.getElementById('generate-edits');
+  const frameNameEl = document.getElementById('frame-name');
+  const checkmarks = document.querySelectorAll('.checkmark');
+  const progressStatus = document.getElementById('progress-status');
 
-// Backend server URL
-const BACKEND_URL = 'http://localhost:3000';
+  // Backend server URL
+  const BACKEND_URL = 'http://localhost:3000';
 
-// Helper to create filename from layer name (matching code.ts logic)
-function createFilename(name, id, ext = 'png') {
-  // Sanitize the layer name: remove/replace invalid filename characters
-  const safeName = name
-    .replace(/[<>:"/\\|?*]/g, '_')  // Replace invalid filename chars
-    .replace(/\s+/g, '_')            // Replace spaces with underscores
-    .replace(/_+/g, '_')             // Collapse multiple underscores
-    .replace(/^_|_$/g, '')           // Trim leading/trailing underscores
-    .substring(0, 100);              // Limit length
+  // Helper to create filename from layer name (matching code.ts logic)
+  function createFilename(name, id, ext = 'png') {
+    // Sanitize the layer name: remove/replace invalid filename characters
+    const safeName = name
+      .replace(/[<>:"/\\|?*]/g, '_')  // Replace invalid filename chars
+      .replace(/\s+/g, '_')            // Replace spaces with underscores
+      .replace(/_+/g, '_')             // Collapse multiple underscores
+      .replace(/^_|_$/g, '')           // Trim leading/trailing underscores
+      .substring(0, 100);              // Limit length
 
-  // Use sanitized name, fallback to ID if name is empty
-  const baseName = safeName || id.replace(/:/g, '_');
-  return `${baseName}.${ext}`;
-}
-
-// ============================================
-// Button State Management
-// ============================================
-function setButtonState(button, state, text) {
-  const btnText = button.querySelector('.btn-text');
-  const spinnerIcon = button.querySelector('.spinner');
-  const checkIcon = button.querySelector('.check-icon');
-
-  let defaultText = 'Export Only';
-  if (button.id === 'ai-rename') {
-    defaultText = 'AI Rename Layers';
-  } else if (button.id === 'generate-edits') {
-    defaultText = 'Generate Edits (5 variants)';
+    // Use sanitized name, fallback to ID if name is empty
+    const baseName = safeName || id.replace(/:/g, '_');
+    return `${baseName}.${ext}`;
   }
 
-  switch(state) {
-    case 'loading':
-      button.disabled = true;
-      btnText.textContent = text || 'Processing...';
-      spinnerIcon.classList.remove('hidden');
-      checkIcon.classList.add('hidden');
-      break;
-    case 'success':
-      button.disabled = false;
-      btnText.textContent = defaultText;
-      spinnerIcon.classList.add('hidden');
-      checkIcon.classList.remove('hidden');
-      setTimeout(() => setButtonState(button, 'default'), 2000);
-      break;
-    case 'default':
-    default:
-      button.disabled = false;
-      btnText.textContent = defaultText;
-      spinnerIcon.classList.add('hidden');
-      checkIcon.classList.add('hidden');
-      break;
+  // ============================================
+  // Button State Management
+  // ============================================
+  function setButtonState(button, state, text) {
+    const btnText = button.querySelector('.btn-text');
+    const spinnerIcon = button.querySelector('.spinner');
+    const checkIcon = button.querySelector('.check-icon');
+
+    let defaultText = 'Export Only';
+    if (button.id === 'ai-rename') {
+      defaultText = 'AI Rename Layers';
+    } else if (button.id === 'generate-edits') {
+      defaultText = 'Generate Edits (5 variants)';
+    }
+
+    switch (state) {
+      case 'loading':
+        button.disabled = true;
+        btnText.textContent = text || 'Processing...';
+        spinnerIcon.classList.remove('hidden');
+        checkIcon.classList.add('hidden');
+        break;
+      case 'success':
+        button.disabled = false;
+        btnText.textContent = defaultText;
+        spinnerIcon.classList.add('hidden');
+        checkIcon.classList.remove('hidden');
+        setTimeout(() => setButtonState(button, 'default'), 2000);
+        break;
+      case 'default':
+      default:
+        button.disabled = false;
+        btnText.textContent = defaultText;
+        spinnerIcon.classList.add('hidden');
+        checkIcon.classList.add('hidden');
+        break;
+    }
   }
-}
 
-function showProgress(message) {
-  progressStatus.textContent = message;
-  progressStatus.classList.add('visible');
-}
+  function showProgress(message) {
+    progressStatus.textContent = message;
+    progressStatus.classList.add('visible');
+  }
 
-function hideProgress() {
-  progressStatus.classList.remove('visible');
-}
+  function hideProgress() {
+    progressStatus.classList.remove('visible');
+  }
 
-// ============================================
-// Backend API Calls
-// ============================================
-async function callRenamingAPI(layers) {
-  const response = await fetch(`${BACKEND_URL}/api/rename-layers`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      layers: layers
-        .filter(l => l.imageData) // Only send layers with image data
-        .map(l => ({
-          id: l.id,
-          imageBase64: l.imageData,
-          currentName: l.name,
-          type: l.type
+  // ============================================
+  // Backend API Calls
+  // ============================================
+  async function callRenamingAPI(layers) {
+    const response = await fetch(`${BACKEND_URL}/api/rename-layers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        layers: layers
+          .filter(l => l.imageData) // Only send layers with image data
+          .map(l => ({
+            id: l.id,
+            imageBase64: l.imageData,
+            currentName: l.name,
+            type: l.type
+          }))
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `Server error: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64) {
+    const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frameName,
+        frameWidth,
+        frameHeight,
+        frameImageBase64,  // Include frame image for AI vision analysis
+        layers: layers.map(l => ({
+          name: l.name,
+          type: l.type,
+          x: l.x,
+          y: l.y,
+          width: l.width,
+          height: l.height,
+          fills: l.fills,
+          strokes: l.strokes,
+          opacity: l.opacity,
+          text: l.text,
+          fontSize: l.fontSize,
+          cornerRadius: l.cornerRadius
         }))
-    })
-  });
+      })
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.message || `Server error: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64) {
-  const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      frameName,
-      frameWidth,
-      frameHeight,
-      frameImageBase64,  // Include frame image for AI vision analysis
-      layers: layers.map(l => ({
-        name: l.name,
-        type: l.type,
-        x: l.x,
-        y: l.y,
-        width: l.width,
-        height: l.height,
-        fills: l.fills,
-        strokes: l.strokes,
-        opacity: l.opacity,
-        text: l.text,
-        fontSize: l.fontSize,
-        cornerRadius: l.cornerRadius
-      }))
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Server error: ${response.statusText}`);
-  }
-
-  return response.json();
-}
-
-// ============================================
-// AI Rename Flow (decoupled from export)
-// ============================================
-aiRenameBtn.onclick = async () => {
-  console.log('AI Rename button clicked');
-  try {
-    setButtonState(aiRenameBtn, 'loading', 'Preparing...');
-    showProgress('Starting AI rename process...');
-
-    // Request layer images for renaming
-    parent.postMessage({
-      pluginMessage: { type: 'export-for-renaming' }
-    }, '*');
-  } catch (e) {
-    console.error('AI Rename error:', e);
-    setButtonState(aiRenameBtn, 'default');
-    hideProgress();
-    alert('Error: ' + e.message);
-  }
-};
-
-// ============================================
-// Generate Edits Flow
-// ============================================
-generateEditsBtn.onclick = async () => {
-  console.log('Generate Edits button clicked');
-  try {
-    setButtonState(generateEditsBtn, 'loading', 'Preparing...');
-    showProgress('Extracting layer metadata...');
-
-    // Request layer metadata for edit generation
-    parent.postMessage({
-      pluginMessage: { type: 'prepare-for-edits' }
-    }, '*');
-  } catch (e) {
-    console.error('Generate Edits error:', e);
-    setButtonState(generateEditsBtn, 'default');
-    hideProgress();
-    alert('Error: ' + e.message);
-  }
-};
-
-// ============================================
-// Regular Export Flow
-// ============================================
-exportBtn.onclick = () => {
-  console.log('Export button clicked');
-  try {
-    setButtonState(exportBtn, 'loading', 'Exporting...');
-    showProgress('Exporting frame...');
-
-    const format = 'png';
-    const scale = 4;
-
-    parent.postMessage({ pluginMessage: { type: 'export-frame', format, scale } }, '*');
-  } catch (e) {
-    console.error('Error during export:', e);
-    setButtonState(exportBtn, 'default');
-    hideProgress();
-  }
-};
-
-// ============================================
-// Cancel Button
-// ============================================
-document.getElementById('cancel').onclick = () => {
-  parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
-};
-
-// ============================================
-// Message Handler
-// ============================================
-window.onmessage = async (event) => {
-  const msg = event.data.pluginMessage;
-  if (!msg) return;
-
-  // ============================================
-  // Selection Change
-  // ============================================
-  if (msg.type === 'selection-change') {
-    if (msg.hasFrame) {
-      frameNameEl.textContent = msg.frameName;
-      checkmarks.forEach(checkmark => checkmark.classList.remove('hidden'));
-    } else {
-      frameNameEl.textContent = 'Select Frame to Export';
-      checkmarks.forEach(checkmark => checkmark.classList.add('hidden'));
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server error: ${response.statusText}`);
     }
-    return;
+
+    return response.json();
   }
 
   // ============================================
-  // Progress Updates
+  // AI Rename Flow (decoupled from export)
   // ============================================
-  if (msg.type === 'progress') {
-    showProgress(msg.message);
-    return;
-  }
-
-  // ============================================
-  // AI Rename Flow - Process layers through AI
-  // ============================================
-  if (msg.type === 'layers-for-renaming') {
-    console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
-    console.log('[UI] Layer IDs:', msg.layers.map(l => l.id));
+  aiRenameBtn.onclick = async () => {
+    console.log('AI Rename button clicked');
     try {
-      setButtonState(aiRenameBtn, 'loading', 'AI analyzing...');
-      showProgress(`Sending ${msg.layers.length} layers to AI for naming...`);
+      setButtonState(aiRenameBtn, 'loading', 'Preparing...');
+      showProgress('Starting AI rename process...');
 
-      // Call backend to get AI-generated names
-      console.log('[UI] Calling backend API...');
-      const result = await callRenamingAPI(msg.layers);
-      console.log('[UI] Backend response received:', JSON.stringify(result, null, 2));
-
-      // Send renames back to plugin
-      setButtonState(aiRenameBtn, 'loading', 'Applying names...');
-      showProgress(`Applying ${result.layers.length} AI-generated names...`);
-
-      console.log('[UI] Sending apply-renames to plugin with renames:', result.layers);
+      // Request layer images for renaming
       parent.postMessage({
-        pluginMessage: {
-          type: 'apply-renames',
-          renames: result.layers
-        }
+        pluginMessage: { type: 'export-for-renaming' }
       }, '*');
-      console.log('[UI] apply-renames message sent');
-    } catch (error) {
-      console.error('[UI] AI renaming failed:', error);
+    } catch (e) {
+      console.error('AI Rename error:', e);
       setButtonState(aiRenameBtn, 'default');
       hideProgress();
-
-      if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
-        alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
-      } else {
-        alert('AI renaming failed: ' + error.message);
-      }
+      alert('Error: ' + e.message);
     }
-    return;
-  }
+  };
 
   // ============================================
-  // AI Rename Complete - show success (decoupled from export)
+  // Generate Edits Flow
   // ============================================
-  if (msg.type === 'renames-applied') {
-    console.log('[UI] Received renames-applied:', msg);
-
-    if (msg.successCount > 0) {
-      setButtonState(aiRenameBtn, 'success');
-      showProgress(`Renamed ${msg.successCount} of ${msg.totalCount} layers successfully.`);
-    } else if (msg.totalCount === 0) {
-      setButtonState(aiRenameBtn, 'default');
-      hideProgress();
-      alert('No layers found to rename.');
-    } else {
-      setButtonState(aiRenameBtn, 'default');
-      hideProgress();
-      alert(`Failed to rename layers. ${msg.failCount} errors occurred.`);
-    }
-
-    // Reset button after 2 seconds
-    setTimeout(() => {
-      setButtonState(aiRenameBtn, 'default');
-      hideProgress();
-    }, 2000);
-    return;
-  }
-
-  // ============================================
-  // Generate Edits Flow - Receive metadata and call AI
-  // ============================================
-  if (msg.type === 'metadata-for-edits') {
-    console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
-    console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
+  generateEditsBtn.onclick = async () => {
+    console.log('Generate Edits button clicked');
     try {
-      setButtonState(generateEditsBtn, 'loading', 'AI analyzing...');
-      showProgress(`AI is analyzing "${msg.frameName}" to generate 5 creative variants...`);
+      setButtonState(generateEditsBtn, 'loading', 'Preparing...');
+      showProgress('Extracting layer metadata...');
 
-      // Call backend to generate edit variants (with image for vision analysis)
-      const result = await callGenerateEditsAPI(
-        msg.frameName,
-        msg.frameWidth,
-        msg.frameHeight,
-        msg.layers,
-        msg.frameImageBase64
-      );
-
-      console.log('[UI] Generated variants:', result.variants.length);
-      result.variants.forEach((v, i) => {
-        console.log(`  Variant ${i + 1}: ${v.theme} - ${v.instructions.length} instructions`);
-        console.log(`    "${v.humanPrompt}"`);
-      });
-
-      // Send variants back to plugin to apply
-      setButtonState(generateEditsBtn, 'loading', 'Applying edits...');
-      showProgress(`Generated ${result.variants.length} variants. Applying edits to canvas...`);
-
+      // Request layer metadata for edit generation
       parent.postMessage({
-        pluginMessage: {
-          type: 'apply-edit-variants',
-          variants: result.variants
-        }
+        pluginMessage: { type: 'prepare-for-edits' }
       }, '*');
-
-    } catch (error) {
-      console.error('[UI] Generate edits failed:', error);
+    } catch (e) {
+      console.error('Generate Edits error:', e);
       setButtonState(generateEditsBtn, 'default');
       hideProgress();
-
-      if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
-        alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
-      } else {
-        alert('Generate edits failed: ' + error.message);
-      }
+      alert('Error: ' + e.message);
     }
-    return;
-  }
+  };
 
   // ============================================
-  // Export Data (both regular and AI flow use this)
+  // Regular Export Flow
   // ============================================
-  if (msg.type === 'export-data') {
+  exportBtn.onclick = () => {
+    console.log('Export button clicked');
     try {
-      // Validate required data
-      if (!msg.meta || !msg.layers || !msg.folderName) {
-        throw new Error('Missing required export data. Please try again.');
-      }
+      setButtonState(exportBtn, 'loading', 'Exporting...');
+      showProgress('Exporting frame...');
 
-      if (!msg.meta.component || !msg.meta.layers) {
-        throw new Error('Invalid metadata structure. Please try again.');
-      }
+      const format = 'png';
+      const scale = 4;
 
-      const frameInfo = msg.totalFrames > 1
-        ? ` (${msg.frameIndex + 1}/${msg.totalFrames})`
-        : '';
-
-      let reconstructedBlob;
-      const exportFormat = msg.format || 'png';
-
-      if (exportFormat === 'svg') {
-        // SVG reconstruction
-        // Sort layers by z-index
-        const sortedLayers = msg.meta.layers
-          .filter(layer => layer.visible)
-          .sort((a, b) => a.z - b.z);
-
-        // Build SVG content
-        let svgContent = `<svg width="${msg.meta.component.width}" height="${msg.meta.component.height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n`;
-
-        for (const layer of sortedLayers) {
-          const layerData = msg.layers.find(l => l.filename === createFilename(layer.name, layer.id, 'svg'));
-          if (!layerData) continue;
-
-          // Decode base64 SVG
-          const svgText = atob(layerData.data);
-
-          // Use export bounds if available
-          const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
-          const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
-
-          // Wrap in a group with transform for positioning
-          svgContent += `  <g transform="translate(${useX}, ${useY})">\n`;
-          svgContent += `    ${svgText}\n`;
-          svgContent += `  </g>\n`;
-        }
-
-        svgContent += '</svg>';
-
-        // Convert SVG to blob
-        reconstructedBlob = new Blob([svgContent], { type: 'image/svg+xml' });
-
-      } else {
-        // PNG reconstruction
-        // Get scale factor from metadata (default to 2 for backwards compatibility)
-        const scale = msg.meta.scale || 2;
-
-        // Create canvas at the SCALED resolution to match exported layers
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(msg.meta.component.width * scale);
-        canvas.height = Math.round(msg.meta.component.height * scale);
-        const ctx = canvas.getContext('2d');
-
-        // Sort layers by z-index
-        const sortedLayers = msg.meta.layers
-          .filter(layer => layer.visible)
-          .sort((a, b) => a.z - b.z);
-
-        // Load and draw all layer images
-        const loadPromises = [];
-        for (let i = 0; i < sortedLayers.length; i++) {
-          const layer = sortedLayers[i];
-          const layerData = msg.layers.find(l => l.filename === createFilename(layer.name, layer.id, 'png'));
-
-          if (!layerData) continue;
-
-          const promise = new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              // Use export bounds if available (for accurate positioning of effects, strokes, etc.)
-              // Otherwise fall back to node bounds
-              const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
-              const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
-
-              // Both canvas and images are at the same scale
-              const layerX = Math.round(useX * scale);
-              const layerY = Math.round(useY * scale);
-
-              // Actual image dimensions at the exported scale
-              const imgWidth = img.naturalWidth || img.width;
-              const imgHeight = img.naturalHeight || img.height;
-
-              // Calculate clipping in scaled space
-              const sx = Math.max(0, -layerX);
-              const sy = Math.max(0, -layerY);
-              const sw = Math.min(imgWidth - sx, canvas.width - Math.max(0, layerX));
-              const sh = Math.min(imgHeight - sy, canvas.height - Math.max(0, layerY));
-
-              // Draw position in scaled space
-              const dx = Math.max(0, layerX);
-              const dy = Math.max(0, layerY);
-
-              if (sw > 0 && sh > 0) {
-                ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
-              }
-              resolve();
-            };
-            img.onerror = reject;
-            img.src = 'data:image/png;base64,' + layerData.data;
-          });
-
-          loadPromises.push(promise);
-        }
-
-        // Wait for all images to be drawn
-        await Promise.all(loadPromises);
-
-        // Convert canvas to blob
-        reconstructedBlob = await new Promise((resolve, reject) => {
-          canvas.toBlob((blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Failed to create image blob'));
-            }
-          }, 'image/png');
-        });
-      }
-
-      // Removed status updates
-
-      const zip = new JSZip();
-      const folderName = msg.folderName;
-
-      // Add meta.json with validation
-      const metaWithFormat = { ...msg.meta, format: exportFormat };
-
-      // Validate JSON serialization
-      let metaJson;
-      try {
-        metaJson = JSON.stringify(metaWithFormat, null, 2);
-        if (!metaJson || metaJson === '{}') {
-          throw new Error('Failed to serialize metadata');
-        }
-      } catch (e) {
-        throw new Error('Failed to create metadata file: ' + e.message);
-      }
-
-      zip.file(`${folderName}/meta.json`, metaJson);
-
-      // Add all layer files (PNG or SVG)
-      const layersFolder = zip.folder(`${folderName}/layers`);
-      for (const layer of msg.layers) {
-        layersFolder.file(layer.filename, layer.data, { base64: true });
-      }
-
-      // Add reconstructed image with correct extension
-      const reconstructedExt = exportFormat === 'svg' ? '.svg' : '.png';
-
-      // Validate reconstructed blob before adding
-      if (!reconstructedBlob) {
-        throw new Error('Failed to create reconstructed image');
-      }
-
-      zip.file(`${folderName}/${msg.meta.component.name}_reconstructed${reconstructedExt}`, reconstructedBlob);
-
-      // Generate ZIP with explicit options for cross-platform compatibility
-      const blob = await zip.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: {
-          level: 6
-        },
-        platform: 'UNIX' // Ensures consistent path separators
-      });
-
-      // Validate ZIP blob
-      if (!blob || blob.size === 0) {
-        throw new Error('Failed to generate ZIP file');
-      }
-
-      // Trigger download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${folderName}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-    } catch (error) {
-      console.error('Error creating ZIP:', error);
-      alert('Export failed: ' + error.message);
+      parent.postMessage({ pluginMessage: { type: 'export-frame', format, scale } }, '*');
+    } catch (e) {
+      console.error('Error during export:', e);
       setButtonState(exportBtn, 'default');
-      setButtonState(aiRenameBtn, 'default');
       hideProgress();
     }
-  }
+  };
 
   // ============================================
-  // All Exports Complete
+  // Cancel Button
   // ============================================
-  if (msg.type === 'all-exports-complete') {
-    // Show success state in all buttons (whichever was active)
-    setButtonState(exportBtn, 'success');
-    setButtonState(aiRenameBtn, 'success');
-    hideProgress();
-  }
+  document.getElementById('cancel').onclick = () => {
+    parent.postMessage({ pluginMessage: { type: 'cancel' } }, '*');
+  };
 
   // ============================================
-  // Variants Created (Generate Edits complete)
+  // Message Handler
   // ============================================
-  if (msg.type === 'variants-created') {
-    setButtonState(generateEditsBtn, 'success');
-    hideProgress();
-    console.log(`[UI] Created ${msg.variantCount} variants successfully`);
-  }
+  window.onmessage = async (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
 
-  // ============================================
-  // Error Handler
-  // ============================================
-  if (msg.type === 'error') {
-    alert(msg.message);
-    setButtonState(exportBtn, 'default');
-    setButtonState(aiRenameBtn, 'default');
-    setButtonState(generateEditsBtn, 'default');
-    hideProgress();
-  }
-};
+    // ============================================
+    // Selection Change
+    // ============================================
+    if (msg.type === 'selection-change') {
+      if (msg.hasFrame) {
+        frameNameEl.textContent = msg.frameName;
+        checkmarks.forEach(checkmark => checkmark.classList.remove('hidden'));
+      } else {
+        frameNameEl.textContent = 'Select Frame to Export';
+        checkmarks.forEach(checkmark => checkmark.classList.add('hidden'));
+      }
+      return;
+    }
+
+    // ============================================
+    // Progress Updates
+    // ============================================
+    if (msg.type === 'progress') {
+      showProgress(msg.message);
+      return;
+    }
+
+    // ============================================
+    // AI Rename Flow - Process layers through AI
+    // ============================================
+    if (msg.type === 'layers-for-renaming') {
+      console.log('[UI] Received layers-for-renaming:', msg.layers.length, 'layers');
+      console.log('[UI] Layer IDs:', msg.layers.map(l => l.id));
+      try {
+        setButtonState(aiRenameBtn, 'loading', 'AI analyzing...');
+        showProgress(`Sending ${msg.layers.length} layers to AI for naming...`);
+
+        // Call backend to get AI-generated names
+        console.log('[UI] Calling backend API...');
+        const result = await callRenamingAPI(msg.layers);
+        console.log('[UI] Backend response received:', JSON.stringify(result, null, 2));
+
+        // Send renames back to plugin
+        setButtonState(aiRenameBtn, 'loading', 'Applying names...');
+        showProgress(`Applying ${result.layers.length} AI-generated names...`);
+
+        console.log('[UI] Sending apply-renames to plugin with renames:', result.layers);
+        parent.postMessage({
+          pluginMessage: {
+            type: 'apply-renames',
+            renames: result.layers
+          }
+        }, '*');
+        console.log('[UI] apply-renames message sent');
+      } catch (error) {
+        console.error('[UI] AI renaming failed:', error);
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+
+        if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+          alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
+        } else {
+          alert('AI renaming failed: ' + error.message);
+        }
+      }
+      return;
+    }
+
+    // ============================================
+    // AI Rename Complete - show success (decoupled from export)
+    // ============================================
+    if (msg.type === 'renames-applied') {
+      console.log('[UI] Received renames-applied:', msg);
+
+      if (msg.successCount > 0) {
+        setButtonState(aiRenameBtn, 'success');
+        showProgress(`Renamed ${msg.successCount} of ${msg.totalCount} layers successfully.`);
+      } else if (msg.totalCount === 0) {
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+        alert('No layers found to rename.');
+      } else {
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+        alert(`Failed to rename layers. ${msg.failCount} errors occurred.`);
+      }
+
+      // Reset button after 2 seconds
+      setTimeout(() => {
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+      }, 2000);
+      return;
+    }
+
+    // ============================================
+    // Generate Edits Flow - Receive metadata and call AI
+    // ============================================
+    if (msg.type === 'metadata-for-edits') {
+      console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
+      console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
+      try {
+        setButtonState(generateEditsBtn, 'loading', 'AI analyzing...');
+        showProgress(`AI is analyzing "${msg.frameName}" to generate 5 creative variants...`);
+
+        // Call backend to generate edit variants (with image for vision analysis)
+        const result = await callGenerateEditsAPI(
+          msg.frameName,
+          msg.frameWidth,
+          msg.frameHeight,
+          msg.layers,
+          msg.frameImageBase64
+        );
+
+        console.log('[UI] Generated variants:', result.variants.length);
+        result.variants.forEach((v, i) => {
+          console.log(`  Variant ${i + 1}: ${v.theme} - ${v.instructions.length} instructions`);
+          console.log(`    "${v.humanPrompt}"`);
+        });
+
+        // Send variants back to plugin to apply
+        setButtonState(generateEditsBtn, 'loading', 'Applying edits...');
+        showProgress(`Generated ${result.variants.length} variants. Applying edits to canvas...`);
+
+        parent.postMessage({
+          pluginMessage: {
+            type: 'apply-edit-variants',
+            variants: result.variants
+          }
+        }, '*');
+
+      } catch (error) {
+        console.error('[UI] Generate edits failed:', error);
+        setButtonState(generateEditsBtn, 'default');
+        hideProgress();
+
+        if (error.message.includes('fetch') || error.message.includes('Failed to fetch')) {
+          alert('Cannot connect to AI server.\n\nPlease ensure the server is running:\ncd server && npm run dev');
+        } else {
+          alert('Generate edits failed: ' + error.message);
+        }
+      }
+      return;
+    }
+
+    // ============================================
+    // Export Data (both regular and AI flow use this)
+    // ============================================
+    if (msg.type === 'export-data') {
+      try {
+        // Validate required data
+        if (!msg.meta || !msg.layers || !msg.folderName) {
+          throw new Error('Missing required export data. Please try again.');
+        }
+
+        if (!msg.meta.component || !msg.meta.layers) {
+          throw new Error('Invalid metadata structure. Please try again.');
+        }
+
+        const frameInfo = msg.totalFrames > 1
+          ? ` (${msg.frameIndex + 1}/${msg.totalFrames})`
+          : '';
+
+        let reconstructedBlob;
+        const exportFormat = msg.format || 'png';
+
+        if (exportFormat === 'svg') {
+          // SVG reconstruction
+          // Sort layers by z-index
+          const sortedLayers = msg.meta.layers
+            .filter(layer => layer.visible)
+            .sort((a, b) => a.z - b.z);
+
+          // Build SVG content
+          let svgContent = `<svg width="${msg.meta.component.width}" height="${msg.meta.component.height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n`;
+
+          for (const layer of sortedLayers) {
+            const layerData = msg.layers.find(l => l.filename === createFilename(layer.name, layer.id, 'svg'));
+            if (!layerData) continue;
+
+            // Decode base64 SVG
+            const svgText = atob(layerData.data);
+
+            // Use export bounds if available
+            const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
+            const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
+
+            // Wrap in a group with transform for positioning
+            svgContent += `  <g transform="translate(${useX}, ${useY})">\n`;
+            svgContent += `    ${svgText}\n`;
+            svgContent += `  </g>\n`;
+          }
+
+          svgContent += '</svg>';
+
+          // Convert SVG to blob
+          reconstructedBlob = new Blob([svgContent], { type: 'image/svg+xml' });
+
+        } else {
+          // PNG reconstruction
+          // Get scale factor from metadata (default to 2 for backwards compatibility)
+          const scale = msg.meta.scale || 2;
+
+          // Create canvas at the SCALED resolution to match exported layers
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(msg.meta.component.width * scale);
+          canvas.height = Math.round(msg.meta.component.height * scale);
+          const ctx = canvas.getContext('2d');
+
+          // Sort layers by z-index
+          const sortedLayers = msg.meta.layers
+            .filter(layer => layer.visible)
+            .sort((a, b) => a.z - b.z);
+
+          // Load and draw all layer images
+          const loadPromises = [];
+          for (let i = 0; i < sortedLayers.length; i++) {
+            const layer = sortedLayers[i];
+            const layerData = msg.layers.find(l => l.filename === createFilename(layer.name, layer.id, 'png'));
+
+            if (!layerData) continue;
+
+            const promise = new Promise((resolve, reject) => {
+              const img = new Image();
+              img.onload = () => {
+                // Use export bounds if available (for accurate positioning of effects, strokes, etc.)
+                // Otherwise fall back to node bounds
+                const useX = layer.exportX !== undefined ? layer.exportX : layer.x;
+                const useY = layer.exportY !== undefined ? layer.exportY : layer.y;
+
+                // Both canvas and images are at the same scale
+                const layerX = Math.round(useX * scale);
+                const layerY = Math.round(useY * scale);
+
+                // Actual image dimensions at the exported scale
+                const imgWidth = img.naturalWidth || img.width;
+                const imgHeight = img.naturalHeight || img.height;
+
+                // Calculate clipping in scaled space
+                const sx = Math.max(0, -layerX);
+                const sy = Math.max(0, -layerY);
+                const sw = Math.min(imgWidth - sx, canvas.width - Math.max(0, layerX));
+                const sh = Math.min(imgHeight - sy, canvas.height - Math.max(0, layerY));
+
+                // Draw position in scaled space
+                const dx = Math.max(0, layerX);
+                const dy = Math.max(0, layerY);
+
+                if (sw > 0 && sh > 0) {
+                  ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+                }
+                resolve();
+              };
+              img.onerror = reject;
+              img.src = 'data:image/png;base64,' + layerData.data;
+            });
+
+            loadPromises.push(promise);
+          }
+
+          // Wait for all images to be drawn
+          await Promise.all(loadPromises);
+
+          // Convert canvas to blob
+          reconstructedBlob = await new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(new Error('Failed to create image blob'));
+              }
+            }, 'image/png');
+          });
+        }
+
+        // Removed status updates
+
+        const zip = new JSZip();
+        const folderName = msg.folderName;
+
+        // Add meta.json with validation
+        const metaWithFormat = { ...msg.meta, format: exportFormat };
+
+        // Validate JSON serialization
+        let metaJson;
+        try {
+          metaJson = JSON.stringify(metaWithFormat, null, 2);
+          if (!metaJson || metaJson === '{}') {
+            throw new Error('Failed to serialize metadata');
+          }
+        } catch (e) {
+          throw new Error('Failed to create metadata file: ' + e.message);
+        }
+
+        zip.file(`${folderName}/meta.json`, metaJson);
+
+        // Add all layer files (PNG or SVG)
+        const layersFolder = zip.folder(`${folderName}/layers`);
+        for (const layer of msg.layers) {
+          layersFolder.file(layer.filename, layer.data, { base64: true });
+        }
+
+        // Add reconstructed image with correct extension
+        const reconstructedExt = exportFormat === 'svg' ? '.svg' : '.png';
+
+        // Validate reconstructed blob before adding
+        if (!reconstructedBlob) {
+          throw new Error('Failed to create reconstructed image');
+        }
+
+        zip.file(`${folderName}/${msg.meta.component.name}_reconstructed${reconstructedExt}`, reconstructedBlob);
+
+        // Generate ZIP with explicit options for cross-platform compatibility
+        const blob = await zip.generateAsync({
+          type: 'blob',
+          compression: 'DEFLATE',
+          compressionOptions: {
+            level: 6
+          },
+          platform: 'UNIX' // Ensures consistent path separators
+        });
+
+        // Validate ZIP blob
+        if (!blob || blob.size === 0) {
+          throw new Error('Failed to generate ZIP file');
+        }
+
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${folderName}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+      } catch (error) {
+        console.error('Error creating ZIP:', error);
+        alert('Export failed: ' + error.message);
+        setButtonState(exportBtn, 'default');
+        setButtonState(aiRenameBtn, 'default');
+        hideProgress();
+      }
+    }
+
+    // ============================================
+    // All Exports Complete
+    // ============================================
+    if (msg.type === 'all-exports-complete') {
+      // Show success state in all buttons (whichever was active)
+      setButtonState(exportBtn, 'success');
+      setButtonState(aiRenameBtn, 'success');
+      hideProgress();
+    }
+
+    // ============================================
+    // Variants Created (Generate Edits complete)
+    // ============================================
+    if (msg.type === 'variants-created') {
+      setButtonState(generateEditsBtn, 'success');
+      hideProgress();
+      console.log(`[UI] Created ${msg.variantCount} variants successfully`);
+    }
+
+    // ============================================
+    // Error Handler
+    // ============================================
+    if (msg.type === 'error') {
+      alert(msg.message);
+      setButtonState(exportBtn, 'default');
+      setButtonState(aiRenameBtn, 'default');
+      setButtonState(generateEditsBtn, 'default');
+      hideProgress();
+    }
+  };
 
 </script>
