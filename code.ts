@@ -91,6 +91,7 @@ interface LayerMetadataForAI {
   text?: string;
   fontSize?: number;
   cornerRadius?: number | { topLeft: number; topRight: number; bottomLeft: number; bottomRight: number };
+  hasImageFill?: boolean;  // True if layer has an image fill
 }
 
 interface EditInstruction {
@@ -138,6 +139,9 @@ interface EditInstruction {
   inset?: boolean;          // For addInnerShadow (use with shadow params)
   // Background Blur
   backgroundBlur?: number;  // For addBackgroundBlur (glassmorphism)
+  // AI Image Generation
+  imagePrompt?: string;           // For generateImage - prompt describing the image
+  generatedImageBase64?: string;  // For generateImage - base64 of AI-generated image
 }
 
 interface EditVariant {
@@ -418,6 +422,16 @@ function extractConstraints(node: SceneNode): { horizontal: string; vertical: st
     horizontal: node.constraints.horizontal,
     vertical: node.constraints.vertical
   };
+}
+
+// Check if a layer has an image fill
+function hasImageFill(node: SceneNode): boolean {
+  if (!('fills' in node) || node.fills === figma.mixed) return false;
+
+  const fills = node.fills as readonly Paint[];
+  if (!fills || fills.length === 0) return false;
+
+  return fills.some(fill => fill.type === 'IMAGE' && fill.visible !== false);
 }
 
 // Export a single frame
@@ -865,6 +879,7 @@ async function extractLayerMetadataForEdits(
     const text = await extractText(layer);
     const textProps = extractTextProperties(layer);
 
+    const layerHasImage = hasImageFill(layer);
     metadata.push({
       name: layer.name,
       type: layer.type,
@@ -877,7 +892,8 @@ async function extractLayerMetadataForEdits(
       opacity: 'opacity' in layer ? layer.opacity : 1,
       text: text || undefined,
       fontSize: textProps?.fontSize,
-      cornerRadius: extractCornerRadius(layer)
+      cornerRadius: extractCornerRadius(layer),
+      hasImageFill: layerHasImage || undefined
     });
   }
 
@@ -1013,6 +1029,8 @@ async function executeEditInstruction(
         return executeAddStroke(layer, instruction);
       case 'removeStroke':
         return executeRemoveStroke(layer, instruction);
+      case 'generateImage':
+        return executeGenerateImage(layer, instruction);
       default:
         return { success: false, error: `Unknown action: ${instruction.action}` };
     }
@@ -1821,6 +1839,46 @@ function executeRemoveStroke(
   node.strokes = [];
   console.log(`  Removed all strokes`);
   return { success: true };
+}
+
+// Apply AI-generated image to a layer
+function executeGenerateImage(
+  layer: SceneNode,
+  instruction: EditInstruction
+): { success: boolean; error?: string } {
+  if (!('fills' in layer)) {
+    return { success: false, error: 'Layer does not support fills/images' };
+  }
+
+  // Check if we have the generated image data
+  if (!instruction.generatedImageBase64) {
+    // No image was generated - this could happen if image generation failed or was skipped
+    console.log(`  generateImage: No image data available for "${instruction.target}"`);
+    return { success: false, error: 'No generated image data available' };
+  }
+
+  try {
+    // Convert base64 to Uint8Array using Figma's base64Decode
+    // Note: figma.base64Decode is available in the plugin context
+    const bytes = figma.base64Decode(instruction.generatedImageBase64);
+
+    // Create image from bytes
+    const image = figma.createImage(bytes);
+
+    // Apply image fill to layer
+    const node = layer as RectangleNode | FrameNode;
+    node.fills = [{
+      type: 'IMAGE',
+      imageHash: image.hash,
+      scaleMode: 'FILL'
+    }];
+
+    console.log(`  Applied AI-generated image to "${instruction.target}"`);
+    return { success: true };
+  } catch (error) {
+    console.error(`  Failed to apply generated image:`, error);
+    return { success: false, error: `Failed to apply generated image: ${(error as Error).message}` };
+  }
 }
 
 // ============================================

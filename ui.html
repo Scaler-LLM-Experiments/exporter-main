@@ -324,6 +324,45 @@
   .hidden {
     display: none;
   }
+
+  /* Checkbox Styles */
+  .checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius);
+    background: hsl(var(--muted) / 0.5);
+    border: 1px solid hsl(var(--border));
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+
+  .checkbox-container:hover {
+    background: hsl(var(--muted));
+  }
+
+  .checkbox-container input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    accent-color: hsl(30 80% 50%);
+    cursor: pointer;
+  }
+
+  .checkbox-container label {
+    font-size: 0.8125rem;
+    color: hsl(var(--foreground));
+    cursor: pointer;
+    user-select: none;
+    flex: 1;
+  }
+
+  .checkbox-container .checkbox-hint {
+    font-size: 0.6875rem;
+    color: hsl(var(--muted-foreground));
+  }
 </style>
 
 <h2>Exporter</h2>
@@ -375,6 +414,11 @@
   </svg>
   <span class="btn-text">AI Rename Layers</span>
 </button>
+<div class="checkbox-container" onclick="document.getElementById('generate-images').click(); event.stopPropagation();">
+  <input type="checkbox" id="generate-images" onclick="event.stopPropagation();">
+  <label for="generate-images">Generate AI Images</label>
+  <span class="checkbox-hint">Requires OpenRouter</span>
+</div>
 <button id="generate-edits">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -509,7 +553,7 @@
     return response.json();
   }
 
-  async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64) {
+  async function callGenerateEditsAPI(frameName, frameWidth, frameHeight, layers, frameImageBase64, generateImages = false) {
     const response = await fetch(`${BACKEND_URL}/api/generate-edits`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -518,6 +562,7 @@
         frameWidth,
         frameHeight,
         frameImageBase64,  // Include frame image for AI vision analysis
+        generateImages,    // Whether to generate AI images for image layers
         layers: layers.map(l => ({
           name: l.name,
           type: l.type,
@@ -530,7 +575,8 @@
           opacity: l.opacity,
           text: l.text,
           fontSize: l.fontSize,
-          cornerRadius: l.cornerRadius
+          cornerRadius: l.cornerRadius,
+          hasImageFill: l.hasImageFill  // Pass through image fill info
         }))
       })
     });
@@ -756,8 +802,15 @@
       console.log('[UI] Received metadata-for-edits:', msg.layers.length, 'layers');
       console.log('[UI] Frame image included:', !!msg.frameImageBase64, msg.frameImageBase64 ? `(${Math.round(msg.frameImageBase64.length / 1024)}KB)` : '');
       try {
+        // Check if image generation is enabled
+        const generateImagesCheckbox = document.getElementById('generate-images');
+        const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
+
         setButtonState(generateEditsBtn, 'loading', 'AI analyzing...');
-        showProgress(`AI is analyzing "${msg.frameName}" to generate 5 creative variants...`);
+        const progressMsg = generateImages
+          ? `AI is analyzing "${msg.frameName}" to generate 5 creative variants with AI images...`
+          : `AI is analyzing "${msg.frameName}" to generate 5 creative variants...`;
+        showProgress(progressMsg);
 
         // Call backend to generate edit variants (with image for vision analysis)
         const result = await callGenerateEditsAPI(
@@ -765,7 +818,8 @@
           msg.frameWidth,
           msg.frameHeight,
           msg.layers,
-          msg.frameImageBase64
+          msg.frameImageBase64,
+          generateImages
         );
 
         console.log('[UI] Generated variants:', result.variants.length);

@@ -19,14 +19,82 @@ app.use(cors({
 
 app.use(express.json({ limit: '100mb' }));
 
-// Initialize Gemini
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  console.error('GEMINI_API_KEY environment variable is required');
+// ============================================
+// Provider Configuration
+// ============================================
+
+type AIProvider = 'gemini' | 'openrouter';
+const AI_PROVIDER: AIProvider = (process.env.AI_PROVIDER as AIProvider) || 'gemini';
+
+// Validate required API key based on provider
+if (AI_PROVIDER === 'gemini' && !process.env.GEMINI_API_KEY) {
+  console.error('GEMINI_API_KEY is required when AI_PROVIDER=gemini');
+  process.exit(1);
+}
+if (AI_PROVIDER === 'openrouter' && !process.env.OPENROUTER_API_KEY) {
+  console.error('OPENROUTER_API_KEY is required when AI_PROVIDER=openrouter');
   process.exit(1);
 }
 
-const genAI = new GoogleGenerativeAI(apiKey);
+console.log(`AI Provider: ${AI_PROVIDER.toUpperCase()}`);
+
+// Initialize Gemini (only used when AI_PROVIDER=gemini)
+const genAI = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
+
+// ============================================
+// OpenRouter Client (only used when AI_PROVIDER=openrouter)
+// ============================================
+
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+// Model mappings for OpenRouter (configurable via env vars)
+const OPENROUTER_MODELS = {
+  FAST: process.env.OPENROUTER_MODEL_FAST || 'google/gemini-2.5-flash',           // For rename-layers
+  PRO: process.env.OPENROUTER_MODEL_PRO || 'google/gemini-3-pro-preview',         // For generate-edits
+  IMAGE: process.env.OPENROUTER_MODEL_IMAGE || 'google/gemini-3-pro-image-preview' // For image generation
+};
+
+interface OpenRouterMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
+}
+
+interface OpenRouterRequest {
+  model: string;
+  messages: OpenRouterMessage[];
+  stream?: boolean;
+  temperature?: number;
+  max_tokens?: number;
+  include_reasoning?: boolean;
+}
+
+interface OpenRouterResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+    delta?: {
+      content?: string;
+      reasoning?: string;
+    };
+  }>;
+}
+
+async function callOpenRouter(request: OpenRouterRequest): Promise<globalThis.Response> {
+  return fetch(OPENROUTER_BASE_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://figma-exporter-plugin.local',
+      'X-Title': 'Figma Exporter AI'
+    },
+    body: JSON.stringify(request)
+  });
+}
 
 interface LayerInput {
   id: string;
@@ -63,6 +131,7 @@ interface LayerMetadata {
   text?: string;
   fontSize?: number;
   cornerRadius?: number | { topLeft: number; topRight: number; bottomLeft: number; bottomRight: number };
+  hasImageFill?: boolean;  // True if layer contains an image fill
 }
 
 interface GenerateEditsRequest {
@@ -71,6 +140,7 @@ interface GenerateEditsRequest {
   frameHeight: number;
   frameImageBase64?: string;  // Frame image for AI vision analysis
   layers: LayerMetadata[];
+  generateImages?: boolean;   // Whether to generate AI images for image layers
 }
 
 interface EditInstruction {
@@ -87,6 +157,9 @@ interface EditInstruction {
   height?: number;
   scale?: number;
   position?: 'front' | 'back' | number;
+  // Image generation properties
+  imagePrompt?: string;           // Prompt for AI image generation
+  generatedImageBase64?: string;  // Base64 of generated image (populated by server)
 }
 
 interface EditVariant {
@@ -221,14 +294,105 @@ function parseAndValidateVariants(responseText: string, layers: LayerMetadata[])
   return parsed.variants;
 }
 
-// Generate layer name using Gemini Vision
+// Generate an image using AI (OpenRouter only for now)
+async function generateImageFromPrompt(
+  imagePrompt: string,
+  contextDescription: string
+): Promise<string | null> {
+  if (AI_PROVIDER !== 'openrouter') {
+    console.log('  Image generation only supported with OpenRouter provider');
+    return null;
+  }
+
+  try {
+    console.log(`  Generating image: "${imagePrompt.substring(0, 50)}..."`);
+
+    const response = await callOpenRouter({
+      model: OPENROUTER_MODELS.IMAGE,
+      messages: [{
+        role: 'user',
+        content: `You are generating an image for a design variation.
+
+Context: ${contextDescription}
+
+Generate this image:
+${imagePrompt}
+
+Create a high-quality, professional image that fits the described context and aesthetic.`
+      }],
+      // @ts-expect-error - modalities is a new feature for image generation
+      modalities: ['image', 'text'],
+      temperature: 0.8,
+      max_tokens: 4096
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`  Image generation failed: ${response.status} - ${errorText}`);
+      return null;
+    }
+
+    const data = await response.json() as OpenRouterResponse;
+    const content = data.choices?.[0]?.message?.content;
+
+    // The image should be returned as a data URL in the content
+    if (content && typeof content === 'string' && content.startsWith('data:image')) {
+      // Extract base64 from data URL
+      const base64Match = content.match(/base64,(.+)/);
+      if (base64Match) {
+        console.log('  Image generated successfully');
+        return base64Match[1];
+      }
+    }
+
+    // Check if content is an array with image data
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'image_url' && part.image_url?.url) {
+          const base64Match = part.image_url.url.match(/base64,(.+)/);
+          if (base64Match) {
+            console.log('  Image generated successfully');
+            return base64Match[1];
+          }
+        }
+      }
+    }
+
+    console.log('  No image data found in response');
+    return null;
+  } catch (error) {
+    console.error('  Error generating image:', error);
+    return null;
+  }
+}
+
+// Process image generation instructions in variants
+async function processImageGenerations(
+  variants: EditVariant[],
+  contextDescription: string
+): Promise<EditVariant[]> {
+  for (const variant of variants) {
+    for (const instruction of variant.instructions) {
+      if (instruction.action === 'generateImage' && instruction.imagePrompt) {
+        const generatedImage = await generateImageFromPrompt(
+          instruction.imagePrompt,
+          `${contextDescription} - Variant: ${variant.theme}`
+        );
+        if (generatedImage) {
+          instruction.generatedImageBase64 = generatedImage;
+        }
+      }
+    }
+  }
+  return variants;
+}
+
+// Generate layer name using AI (supports both Gemini and OpenRouter)
 async function generateLayerName(
   imageBase64: string,
   currentName: string,
   layerType: string
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-09-2025' });
-
   const prompt = `You are a UI layer naming assistant. Look at this UI element image and provide a concise, descriptive name.
 
 Rules:
@@ -244,20 +408,52 @@ Element type: ${layerType}
 Respond with ONLY the new name, nothing else. No quotes, no explanation.`;
 
   try {
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          mimeType: 'image/png',
-          data: imageBase64
-        }
+    let text: string;
+
+    if (AI_PROVIDER === 'openrouter') {
+      // OpenRouter path
+      const response = await callOpenRouter({
+        model: OPENROUTER_MODELS.FAST,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'image_url',
+              image_url: { url: `data:image/png;base64,${imageBase64}` }
+            }
+          ]
+        }],
+        temperature: 0.3,
+        max_tokens: 100
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
       }
-    ]);
 
-    const response = result.response;
-    const text = response.text().trim();
+      const data = await response.json() as OpenRouterResponse;
+      text = data.choices?.[0]?.message?.content?.trim() || currentName;
+    } else {
+      // Direct Gemini path
+      if (!genAI) {
+        throw new Error('Gemini client not initialized');
+      }
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-preview-09-2025' });
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: imageBase64
+          }
+        }
+      ]);
+      text = result.response.text().trim();
+    }
 
-    // Clean up the response - remove quotes, extra whitespace, etc.
+    // Clean up the response - same for both providers
     const cleanedName = text
       .replace(/^["']|["']$/g, '') // Remove surrounding quotes
       .replace(/\s+/g, '_') // Replace spaces with underscores
@@ -332,94 +528,226 @@ app.post('/api/rename-layers', async (req: Request, res: Response) => {
 // ============================================
 app.post('/api/generate-edits', async (req: Request, res: Response) => {
   try {
-    const { frameName, frameWidth, frameHeight, frameImageBase64, layers }: GenerateEditsRequest = req.body;
+    const { frameName, frameWidth, frameHeight, frameImageBase64, layers, generateImages }: GenerateEditsRequest = req.body;
 
     if (!layers || !Array.isArray(layers) || layers.length === 0) {
       res.status(400).json({ error: 'Invalid request: layers array required' });
       return;
     }
 
+    // Count image layers
+    const imageLayers = layers.filter(l => l.hasImageFill);
+
     console.log(`\n========================================`);
     console.log(`Generating edits for frame "${frameName}"`);
     console.log(`Frame size: ${frameWidth} x ${frameHeight}`);
-    console.log(`Layers: ${layers.length}`);
+    console.log(`Layers: ${layers.length} (${imageLayers.length} with images)`);
     console.log(`Image included: ${frameImageBase64 ? `Yes (${Math.round(frameImageBase64.length / 1024)}KB)` : 'No'}`);
+    console.log(`Generate AI Images: ${generateImages ? 'YES' : 'No'}`);
     console.log(`========================================\n`);
 
-    // Build the prompt
-    const userPrompt = buildEditPrompt(frameName, frameWidth, frameHeight, layers);
-
-    // Use Gemini 3 Pro with thinking enabled for better design reasoning
-    // Thinking allows the model to reason about color harmony, visual balance,
-    // typography choices before generating JSON instructions
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3-pro-preview',
-      generationConfig: {
-        // @ts-expect-error - thinkingConfig is a new feature
-        thinkingConfig: {
-          thinkingLevel: 'high',  // Maximum reasoning depth for design decisions
-          includeThoughts: true   // Include thinking in response for streaming
-        }
-      }
-    });
-
-    // Build content array
-    const contentParts = frameImageBase64
-      ? [
-          EDIT_GENERATION_PROMPT,
-          { inlineData: { mimeType: 'image/png', data: frameImageBase64 } },
-          userPrompt
-        ]
-      : [EDIT_GENERATION_PROMPT, userPrompt];
-
-    console.log('Using Gemini 3 Pro with thinking (streaming mode)...');
-    console.log('Thinking level: HIGH (maximum reasoning depth)');
-    console.log('\n💭 Model thinking...\n');
-    console.log('─'.repeat(60));
-
-    // Use streaming to show thinking in real-time
-    const streamResult = await model.generateContentStream(contentParts);
-
-    let responseText = '';
-    let thinkingText = '';
-    let isFirstThinking = true;
-
-    // Stream through chunks
-    for await (const chunk of streamResult.stream) {
-      const candidates = chunk.candidates;
-      if (!candidates || candidates.length === 0) continue;
-
-      for (const part of candidates[0].content.parts) {
-        // @ts-expect-error - thought property exists on thinking-enabled responses
-        if (part.thought) {
-          // This is thinking content - stream to console
-          const thought = part.text || '';
-          if (thought) {
-            if (isFirstThinking) {
-              process.stdout.write('\x1b[36m'); // Cyan color for thinking
-              isFirstThinking = false;
-            }
-            process.stdout.write(thought);
-            thinkingText += thought;
-          }
-        } else if (part.text) {
-          // This is the actual response
-          responseText += part.text;
+    // Load the appropriate prompt based on whether image generation is enabled
+    let activePrompt = EDIT_GENERATION_PROMPT;
+    if (generateImages && AI_PROVIDER === 'openrouter') {
+      const imagePromptPath = path.join(__dirname, 'prompts', 'creative-director-with-images.txt');
+      const devImagePromptPath = path.join(__dirname, '..', 'prompts', 'creative-director-with-images.txt');
+      try {
+        activePrompt = fs.readFileSync(imagePromptPath, 'utf-8');
+        console.log('Using image-enabled prompt: creative-director-with-images.txt');
+      } catch {
+        try {
+          activePrompt = fs.readFileSync(devImagePromptPath, 'utf-8');
+          console.log('Using image-enabled prompt (dev): creative-director-with-images.txt');
+        } catch {
+          console.log('Image prompt not found, using default prompt');
         }
       }
     }
 
-    // Reset color and add separator
-    process.stdout.write('\x1b[0m\n');
+    // Build the prompt
+    const userPrompt = buildEditPrompt(frameName, frameWidth, frameHeight, layers);
+
+    let responseText = '';
+    let thinkingText = '';
+
+    if (AI_PROVIDER === 'openrouter') {
+      // ============================================
+      // OpenRouter Path (streaming with SSE)
+      // ============================================
+      console.log('Using OpenRouter with Gemini 3 Pro (streaming mode)...');
+      console.log('\n💭 Model thinking...\n');
+      console.log('─'.repeat(60));
+
+      // Build messages array
+      const messages: OpenRouterMessage[] = [];
+
+      // System prompt
+      messages.push({
+        role: 'system',
+        content: activePrompt
+      });
+
+      // User message with optional image
+      const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+
+      if (frameImageBase64) {
+        userContent.push({
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${frameImageBase64}` }
+        });
+      }
+
+      userContent.push({ type: 'text', text: userPrompt });
+
+      messages.push({
+        role: 'user',
+        content: userContent
+      });
+
+      // Make streaming request
+      const response = await callOpenRouter({
+        model: OPENROUTER_MODELS.PRO,
+        messages,
+        stream: true,
+        temperature: 1.0,
+        max_tokens: 8192,
+        include_reasoning: true
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+      }
+
+      // Process streaming response
+      let isFirstThinking = true;
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+
+          for (const line of lines) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed.choices?.[0]?.delta;
+
+              if (delta?.reasoning) {
+                if (isFirstThinking) {
+                  process.stdout.write('\x1b[36m');
+                  isFirstThinking = false;
+                }
+                process.stdout.write(delta.reasoning);
+                thinkingText += delta.reasoning;
+              }
+
+              if (delta?.content) {
+                responseText += delta.content;
+              }
+            } catch {
+              // Skip invalid JSON chunks
+            }
+          }
+        }
+      }
+
+      process.stdout.write('\x1b[0m\n');
+
+    } else {
+      // ============================================
+      // Direct Gemini Path (existing streaming code)
+      // ============================================
+      if (!genAI) {
+        throw new Error('Gemini client not initialized');
+      }
+
+      console.log('Using Gemini 3 Pro with thinking (streaming mode)...');
+      console.log('Thinking level: HIGH (maximum reasoning depth)');
+      console.log('\n💭 Model thinking...\n');
+      console.log('─'.repeat(60));
+
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-3-pro-preview',
+        generationConfig: {
+          // @ts-expect-error - thinkingConfig is a new feature
+          thinkingConfig: {
+            thinkingLevel: 'high',
+            includeThoughts: true
+          }
+        }
+      });
+
+      const contentParts = frameImageBase64
+        ? [
+            activePrompt,
+            { inlineData: { mimeType: 'image/png', data: frameImageBase64 } },
+            userPrompt
+          ]
+        : [activePrompt, userPrompt];
+
+      const streamResult = await model.generateContentStream(contentParts);
+      let isFirstThinking = true;
+
+      for await (const chunk of streamResult.stream) {
+        const candidates = chunk.candidates;
+        if (!candidates || candidates.length === 0) continue;
+
+        for (const part of candidates[0].content.parts) {
+          // @ts-expect-error - thought property exists on thinking-enabled responses
+          if (part.thought) {
+            const thought = part.text || '';
+            if (thought) {
+              if (isFirstThinking) {
+                process.stdout.write('\x1b[36m');
+                isFirstThinking = false;
+              }
+              process.stdout.write(thought);
+              thinkingText += thought;
+            }
+          } else if (part.text) {
+            responseText += part.text;
+          }
+        }
+      }
+
+      process.stdout.write('\x1b[0m\n');
+    }
+
     console.log('─'.repeat(60));
     console.log(`\n✅ Thinking complete (${thinkingText.length} chars)\n`);
 
-    console.log('Raw Gemini response (first 1000 chars):');
+    console.log('Raw response (first 1000 chars):');
     console.log(responseText.substring(0, 1000));
     console.log('...\n');
 
-    // Parse and validate
-    const variants = parseAndValidateVariants(responseText, layers);
+    // Parse and validate (same for both providers)
+    let variants = parseAndValidateVariants(responseText, layers);
+
+    // Process image generation if enabled
+    if (generateImages && AI_PROVIDER === 'openrouter') {
+      const imageInstructions = variants.flatMap(v =>
+        v.instructions.filter(i => i.action === 'generateImage' && i.imagePrompt)
+      );
+
+      if (imageInstructions.length > 0) {
+        console.log(`\n🖼️  Processing ${imageInstructions.length} image generation requests...\n`);
+        variants = await processImageGenerations(variants, `${frameName} - ${frameWidth}x${frameHeight}`);
+
+        // Count successful generations
+        const successfulImages = variants.flatMap(v =>
+          v.instructions.filter(i => i.action === 'generateImage' && i.generatedImageBase64)
+        ).length;
+        console.log(`✅ Generated ${successfulImages}/${imageInstructions.length} images\n`);
+      }
+    }
 
     console.log(`Generated ${variants.length} variants:`);
     variants.forEach((v, i) => {
@@ -438,21 +766,41 @@ app.post('/api/generate-edits', async (req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
+  const thinkingInfo = AI_PROVIDER === 'gemini'
+    ? 'Thinking level: HIGH (maximum reasoning depth)'
+    : 'Reasoning: enabled via include_reasoning';
+
+  let modelsInfo: string;
+  if (AI_PROVIDER === 'openrouter') {
+    modelsInfo = `
+  Fast (rename):    ${OPENROUTER_MODELS.FAST}
+  Pro (generate):   ${OPENROUTER_MODELS.PRO}
+  Image (generate): ${OPENROUTER_MODELS.IMAGE}`;
+  } else {
+    modelsInfo = `
+  Fast (rename):    gemini-2.5-flash-lite
+  Pro (generate):   gemini-3-pro-preview
+  Image (generate): Not available (use OpenRouter)`;
+  }
+
   console.log(`
 ========================================
   Figma Exporter AI Server
   Running on http://localhost:${PORT}
 ========================================
 
+Provider: ${AI_PROVIDER.toUpperCase()}
+Models:${modelsInfo}
+
 Endpoints:
   GET  /health              - Health check
-  POST /api/rename-layers   - Rename layers using AI (gemini-2.5-flash-lite)
-  POST /api/generate-edits  - Generate 5 design variations (gemini-3-pro + thinking)
+  POST /api/rename-layers   - Rename layers using AI
+  POST /api/generate-edits  - Generate 5 design variations
 
 Config:
   Edit prompt file: ${promptFileName}
-  Thinking level: HIGH (maximum reasoning depth)
-  (Set EDIT_PROMPT_FILE env var to use a different prompt)
+  ${thinkingInfo}
+  (Set AI_PROVIDER env var to switch: gemini | openrouter)
 
 Ready to receive requests from Figma plugin.
 `);
