@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git remote set-url:*)",
+      "WebSearch",
+      "WebFetch(domain:www.figma.com)",
+      "WebFetch(domain:developers.figma.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:openrouter.ai)",
+      "WebFetch(domain:www.datacamp.com)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: Regenerate package-lock.json with correct p-limit@4.0.0\n\nThe previous package-lock.json had p-limit@3.1.0 even though package.json specified ^4.0.0. This caused Railway to install the wrong version, leading to ESM/CommonJS compatibility issues.\n\nRegenerated lockfile by:\n- Removing node_modules and package-lock.json\n- Running npm install fresh\n- Verifying p-limit@4.0.0 is correctly locked\n\nThis should resolve the ERR_REQUIRE_ESM error on Railway deployment.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(curl:*)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

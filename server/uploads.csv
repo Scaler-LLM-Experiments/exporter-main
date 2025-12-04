@@ -1,0 +1,52 @@
+Timestamp,Frame Name,File Name,S3 URL,File Size (Bytes),File Size (MB),Variant Count,User Email,IP Address,Duration (ms),Status,Error Message
+2025-12-04T12:14:59.956Z,00301,00301.zip,,0,0.00,0,unknown,::1,11,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:23:08.795Z,00310,00310.zip,,0,0.00,0,unknown,::1,19,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:37:01.967Z,00303,00303.zip,,0,0.00,0,unknown,::1,45,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:37:03.196Z,00303,00303.zip,,0,0.00,0,unknown,::1,28,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:37:32.215Z,00306,00306.zip,,0,0.00,0,unknown,::1,35,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:37:33.732Z,00306,00306.zip,,0,0.00,0,unknown,::1,41,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:48:40.622Z,00303,00303.zip,,0,0.00,0,unknown,::1,43,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:48:41.518Z,00301,00301.zip,,0,0.00,0,unknown,::1,1,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:48:44.504Z,00303,00303.zip,,0,0.00,0,unknown,::1,38,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:48:46.385Z,00301,00301.zip,,0,0.00,0,unknown,::1,2,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:48:53.062Z,00302,00302.zip,,0,0.00,0,unknown,::1,13,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:49:00.813Z,00302,00302.zip,,0,0.00,0,unknown,::1,19,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:49:04.070Z,00303,00303.zip,,0,0.00,0,unknown,::1,39,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:49:06.190Z,00301,00301.zip,,0,0.00,0,unknown,::1,5,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T12:49:15.942Z,00302,00302.zip,,0,0.00,0,unknown,::1,20,failed,Invalid ARN: Unrecognized format: arn:aws:s3:::taggr-data (type: taggr-data)
+2025-12-04T13:00:50.857Z,00304,00304.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00304.zip,127623667,121.71,11,unknown,::1,1358,success,
+2025-12-04T13:07:24.455Z,00353,00353.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00353.zip,5074916,4.84,4,unknown,::1,176,success,
+2025-12-04T13:07:24.476Z,00353,00353.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00353.zip,5074916,4.84,4,unknown,::1,119,success,
+2025-12-04T13:07:26.718Z,00353,00353.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00353.zip,9854927,9.40,8,unknown,::1,172,success,
+2025-12-04T13:07:31.933Z,00351,00351.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00351.zip,21305425,20.32,11,unknown,::1,386,success,
+2025-12-04T13:07:32.140Z,00351,00351.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00351.zip,21305425,20.32,11,unknown,::1,378,success,
+2025-12-04T13:07:34.191Z,00351,00351.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00351.zip,21305425,20.32,11,unknown,::1,403,success,
+2025-12-04T13:07:34.987Z,00352,00352.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00352.zip,4673074,4.46,4,unknown,::1,221,success,
+2025-12-04T13:07:38.941Z,00352,00352.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00352.zip,7522013,7.17,5,unknown,::1,154,success,
+2025-12-04T13:07:40.396Z,00352,00352.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00352.zip,16555106,15.79,11,unknown,::1,245,success,
+2025-12-04T13:12:49.772Z,00355,00355.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00355.zip,54360538,51.84,10,unknown,::1,624,success,
+2025-12-04T13:12:51.279Z,00355,00355.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00355.zip,59448954,56.69,11,unknown,::1,643,success,
+2025-12-04T13:13:09.130Z,00354,00354.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00354.zip,4570686,4.36,2,unknown,::1,99,success,
+2025-12-04T13:13:14.101Z,00354,00354.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00354.zip,35325788,33.69,10,unknown,::1,423,success,
+2025-12-04T13:13:18.636Z,00356,00356.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00356.zip,13789765,13.15,2,unknown,::1,236,success,
+2025-12-04T13:15:07.471Z,00401,00401.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00401.zip,79460988,75.78,11,unknown,::1,935,success,
+2025-12-04T13:16:36.135Z,00306,00306.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00306.zip,89722927,85.57,10,unknown,::1,985,success,
+2025-12-04T13:16:43.886Z,00306,00306.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00306.zip,105019677,100.15,11,unknown,::1,1107,success,
+2025-12-04T13:17:07.519Z,00305,00305.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00305.zip,110410866,105.30,9,unknown,::1,1176,success,
+2025-12-04T13:17:15.088Z,00305,00305.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00305.zip,113887612,108.61,10,unknown,::1,2323,success,
+2025-12-04T13:21:39.115Z,00308,00308.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00308.zip,8873358,8.46,9,unknown,::1,147,success,
+2025-12-04T13:21:39.381Z,00308,00308.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00308.zip,9115836,8.69,10,unknown,::1,208,success,
+2025-12-04T13:21:44.084Z,00308,00308.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00308.zip,12563689,11.98,11,unknown,::1,152,success,
+2025-12-04T13:21:54.480Z,00310,00310.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00310.zip,38386264,36.61,7,unknown,::1,456,success,
+2025-12-04T13:21:54.822Z,00310,00310.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00310.zip,38386264,36.61,7,unknown,::1,426,success,
+2025-12-04T13:21:57.059Z,00310,00310.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00310.zip,49408365,47.12,11,unknown,::1,532,success,
+2025-12-04T13:21:59.704Z,00309,00309.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00309.zip,7878981,7.51,9,unknown,::1,174,success,
+2025-12-04T13:24:49.156Z,00311,00311.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00311.zip,46860026,44.69,6,unknown,::1,502,success,
+2025-12-04T13:33:04.896Z,00356,00356.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00356.zip,24881897,23.73,4,unknown,::1,319,success,
+2025-12-04T13:33:05.399Z,00356,00356.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00356.zip,24881897,23.73,4,unknown,::1,326,success,
+2025-12-04T13:33:05.832Z,00356,00356.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00356.zip,24881897,23.73,4,unknown,::1,305,success,
+2025-12-04T13:33:20.768Z,00357,00357.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00357.zip,35855962,34.19,5,unknown,::1,648,success,
+2025-12-04T13:33:21.488Z,00357,00357.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00357.zip,36827971,35.12,6,unknown,::1,512,success,
+2025-12-04T13:33:22.166Z,00357,00357.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00357.zip,36827971,35.12,6,unknown,::1,551,success,
+2025-12-04T13:33:53.717Z,00358,00358.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00358.zip,121531623,115.90,9,unknown,::1,1360,success,
+2025-12-04T13:33:54.814Z,00358,00358.zip,https://taggr-data.s3.ap-south-1.amazonaws.com/image-editing-dataset-final-edits/00358.zip,121531623,115.90,9,unknown,::1,1276,success,

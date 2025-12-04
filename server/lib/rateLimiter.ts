@@ -1,37 +1,35 @@
 import rateLimit from 'express-rate-limit';
 
-// General API rate limit (per IP)
+// RATE LIMITING DISABLED FOR INTERNAL TOOL
+// No IP-based restrictions, no user-based restrictions
+// All users from same office can use freely
+
+// Dummy limiters that allow unlimited requests (for internal tool use)
 export const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 requests per minute per IP
-  message: {
-    error: 'Too many requests',
-    message: 'Please wait before making more requests'
-  },
-  standardHeaders: true,
+  windowMs: 60 * 1000,
+  max: 10000, // Effectively unlimited
+  message: { error: 'Rate limit (should not hit this)' },
+  standardHeaders: false,
   legacyHeaders: false
 });
 
-// Heavy operation rate limit (generate-edits, upload-to-s3)
+// Heavy operations now allow 100 requests per minute (no IP restriction)
 export const heavyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 40, // 40 heavy operations per minute per IP (generous limit for bulk processing)
+  max: 100, // 100 heavy operations per minute (increased from 40)
   message: {
     error: 'Too many complex requests',
     message: 'Please wait before generating more variants'
   },
-  standardHeaders: true,
+  standardHeaders: false,
   legacyHeaders: false
 });
 
-// Rename layers rate limit (generous)
+// Rename limiter also set to high limit
 export const renameRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 rename requests per minute per IP (supports large batches)
-  message: {
-    error: 'Too many rename requests',
-    message: 'Please wait before renaming more layers'
-  },
-  standardHeaders: true,
+  windowMs: 60 * 1000,
+  max: 10000, // Effectively unlimited
+  message: { error: 'Rate limit (should not hit this)' },
+  standardHeaders: false,
   legacyHeaders: false
 });

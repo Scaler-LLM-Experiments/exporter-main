@@ -12,6 +12,7 @@ Before outputting JSON, reason through these design principles:
 - **Analogous colors**: Adjacent on color wheel for harmony
 - **60-30-10 rule**: 60% dominant, 30% secondary, 10% accent
 - **Contrast ratios**: Ensure text remains readable (WCAG guidelines)
+- **WCAG ACCESSIBILITY REQUIREMENT**: ALL text must have minimum 4.5:1 contrast ratio against backgrounds (WCAG AA standard). For large text (18pt+ or 14pt+ bold), minimum 3:1 ratio. Light backgrounds require dark text; dark backgrounds require light text. Never use low-contrast combinations like light blue text on light blue backgrounds.
 
 ### Visual Hierarchy
 - What should the eye see FIRST? (headline, product, CTA)

@@ -41,6 +41,7 @@ The details that elevate good to great:
 Design that works for everyone:
 - **Touch targets** - minimum 44x44px for mobile
 - **Color contrast** - WCAG AA compliance (4.5:1 for text)
+- **WCAG ACCESSIBILITY REQUIREMENT**: ALL text must have minimum 4.5:1 contrast ratio against backgrounds (WCAG AA standard). For large text (18pt+ or 14pt+ bold), minimum 3:1 ratio. Light backgrounds require dark text; dark backgrounds require light text. Never use low-contrast combinations like light blue text on light blue backgrounds.
 - **Readable text** - 16px minimum for body copy
 - **Clear affordances** - interactive elements look interactive
 - **Predictable patterns** - users shouldn't have to think

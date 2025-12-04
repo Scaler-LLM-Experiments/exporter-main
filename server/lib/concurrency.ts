@@ -24,8 +24,9 @@ class ConcurrencyLimiter {
 }
 
 // Concurrency limiters for different operations
-export const renameLimiter = new ConcurrencyLimiter(10);  // 10 concurrent rename calls
-export const imageLimiter = new ConcurrencyLimiter(5);    // 5 concurrent image generations
+// Increased for single-user dedicated setup with 196GB RAM
+export const renameLimiter = new ConcurrencyLimiter(50);  // 50 concurrent rename calls
+export const imageLimiter = new ConcurrencyLimiter(20);    // 20 concurrent image generations
 
 /**
  * Process an array of items with controlled concurrency

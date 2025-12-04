@@ -2731,7 +2731,7 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
   if (msg.type === 'start-complete-workflow') {
     try {
       const selection = figma.currentPage.selection;
-      const frames = selection.filter(
+      let frames = selection.filter(
         node => node.type === 'FRAME' || node.type === 'COMPONENT'
       ) as (FrameNode | ComponentNode)[];
 
@@ -2743,7 +2743,28 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
         return;
       }
 
-      const concurrency = msg.concurrency || 16;
+      // Sort frames numerically by extracting leading numbers from frame names
+      frames = frames.sort((a, b) => {
+        // Extract leading numbers from frame names
+        const matchA = a.name.match(/^(\d+)/);
+        const matchB = b.name.match(/^(\d+)/);
+
+        // If both have leading numbers, compare numerically
+        if (matchA && matchB) {
+          return parseInt(matchA[1], 10) - parseInt(matchB[1], 10);
+        }
+
+        // If only one has leading numbers, prioritize it
+        if (matchA) return -1;
+        if (matchB) return 1;
+
+        // If neither has leading numbers, sort alphabetically
+        return a.name.localeCompare(b.name);
+      });
+
+      console.log(`[Workflow] Sorted ${frames.length} frames: ${frames.slice(0, 5).map(f => f.name).join(', ')}${frames.length > 5 ? '...' : ''}`);
+
+      const concurrency = msg.concurrency || 3;  // Default to 3 parallel frames
       const userEmail = msg.userEmail || '';
       const generateImages = msg.generateImages || false;
 

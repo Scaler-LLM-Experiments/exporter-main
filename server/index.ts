@@ -10,6 +10,7 @@ import { renameLimiter, imageLimiter, processWithConcurrency } from './lib/concu
 import { apiLimiter, heavyLimiter, renameRateLimiter } from './lib/rateLimiter';
 import { query as dbQuery } from './lib/db';
 import { aiCache } from './lib/cache';
+import { logUploadToCSV, getCsvFilePath } from './lib/csvLogger';
 
 dotenv.config();
 
@@ -59,8 +60,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Apply general API rate limiting to all routes
-app.use('/api/', apiLimiter);
+// Rate limiting DISABLED for single-user dedicated setup
+// Each user has their own machine + backend, no need for rate limits
+// app.use('/api/', apiLimiter);  // DISABLED
 
 // ============================================
 // Provider Configuration
@@ -1013,7 +1015,7 @@ app.get('/api/prompts', (_req: Request, res: Response) => {
 });
 
 // Main endpoint for renaming layers
-app.post('/api/rename-layers', renameRateLimiter, haltOnTimedout, async (req: Request, res: Response) => {
+app.post('/api/rename-layers', haltOnTimedout, async (req: Request, res: Response) => {
   const startTime = Date.now();
   let jobId: string | null = null;
 
@@ -1147,7 +1149,7 @@ app.post('/api/rename-layers', renameRateLimiter, haltOnTimedout, async (req: Re
 // ============================================
 // Generate Edits Endpoint
 // ============================================
-app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Request, res: Response) => {
+app.post('/api/generate-edits', haltOnTimedout, async (req: Request, res: Response) => {
   const startTime = Date.now();
   let jobId: string | null = null;
 
@@ -1475,7 +1477,7 @@ app.post('/api/generate-edits', heavyLimiter, haltOnTimedout, async (req: Reques
 // S3 Upload Endpoint
 // ============================================
 
-app.post('/api/upload-to-s3', heavyLimiter, async (req: Request, res: Response) => {
+app.post('/api/upload-to-s3', async (req: Request, res: Response) => {
   const startTime = Date.now();
   let jobId: string | null = null;
 
@@ -1553,6 +1555,21 @@ app.post('/api/upload-to-s3', heavyLimiter, async (req: Request, res: Response) 
 
     console.log(`[S3 Upload] Completed in ${duration}ms`);
 
+    // Log successful upload to CSV
+    logUploadToCSV({
+      timestamp: new Date().toISOString(),
+      frameName,
+      fileName,
+      s3Url,
+      fileSizeBytes: buffer.length,
+      fileSizeMB: (buffer.length / (1024 * 1024)).toFixed(2),
+      variantCount: variantCount || 0,
+      userEmail: userEmail || 'unknown',
+      ipAddress: ipAddress || 'unknown',
+      durationMs: duration,
+      status: 'success'
+    });
+
     res.json({
       success: true,
       s3Url,
@@ -1564,6 +1581,24 @@ app.post('/api/upload-to-s3', heavyLimiter, async (req: Request, res: Response) 
   } catch (error) {
     const duration = Date.now() - startTime;
     console.error(`[Job ${jobId}] Error in /api/upload-to-s3:`, error);
+
+    // Log failed upload to CSV
+    const { frameName, userEmail } = req.body;
+    const ipAddress = req.ip || req.socket.remoteAddress || 'unknown';
+
+    logUploadToCSV({
+      timestamp: new Date().toISOString(),
+      frameName: frameName || 'unknown',
+      fileName: `${frameName || 'unknown'}.zip`,
+      fileSizeBytes: 0,
+      fileSizeMB: '0.00',
+      variantCount: 0,
+      userEmail: userEmail || 'unknown',
+      ipAddress,
+      durationMs: duration,
+      status: 'failed',
+      errorMessage: (error as Error).message
+    });
 
     // Update job as failed
     if (jobId) {
@@ -1619,6 +1654,7 @@ Config:
   S3 Uploads: ${isS3Enabled ? 'ENABLED' : 'DISABLED'}${isS3Enabled ? ` (bucket: ${S3_BUCKET_NAME})` : ''}
   Edit prompt file: ${promptFileName}
   ${thinkingInfo}
+  CSV Upload Log: ${getCsvFilePath()}
   (Set AI_PROVIDER env var to switch: gemini | openrouter)
 
 Ready to receive requests from Figma plugin.

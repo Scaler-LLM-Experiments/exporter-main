@@ -74,7 +74,7 @@ This approach ensures visual effects like shadows and blurs are properly capture
 
 ### Metadata Extraction
 
-The plugin extracts comprehensive metadata for each layer (`code.ts:455-500`):
+The plugin extracts comprehensive metadata for each layer (see `extractLayerMetadataForEdits` function in `code.ts`):
 - Position (x, y), dimensions (width, height), and z-index
 - **Export bounds** (`exportX`, `exportY`, `exportWidth`, `exportHeight`) - the actual rendered bounds including effects and strokes, used for accurate reconstruction
 - **Node bounds** (`x`, `y`, `width`, `height`) - the logical bounds of the node
@@ -86,7 +86,7 @@ The plugin extracts comprehensive metadata for each layer (`code.ts:455-500`):
 
 The plugin provides two reconstruction methods:
 
-1. **Client-side (in `ui.html:238-415`)**:
+1. **Client-side (in `ui.html`)**:
    - Used for immediate download after export
    - Creates composite image in browser using Canvas API (PNG) or SVG composition (SVG)
    - Uses `exportX/exportY` coordinates when available for accurate positioning
@@ -165,6 +165,16 @@ The plugin includes an optional AI-powered backend (`server/index.ts`) that prov
 - `renameLimiter`: Limits parallel rename operations
 - `imageLimiter`: Limits parallel image generation
 - `processWithConcurrency`: Helper for processing items with controlled parallelism
+
+**7. Response Caching** (`server/lib/cache.ts`):
+- In-memory cache for AI responses using SHA-256 content hashing
+- 24-hour default TTL, automatic cleanup every 10 minutes
+- Tracks hit/miss statistics for monitoring
+- Can be upgraded to Redis for multi-instance deployments
+
+**8. CSV Logging** (`server/lib/csvLogger.ts`):
+- Optional CSV-based logging for tracking API requests and exports
+- Alternative to PostgreSQL for lightweight deployments
 
 #### Network Access
 

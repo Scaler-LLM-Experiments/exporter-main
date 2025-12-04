@@ -593,9 +593,9 @@
   const userEmailInput = document.getElementById('user-email');
 
   // Backend server URL
-  // IMPORTANT: Update this to your Railway URL after deployment!
-  // Format: https://your-app-name.up.railway.app
-  const BACKEND_URL = 'https://asli-designer-production.up.railway.app'; // Railway production URL
+  // For production: https://asli-designer-production.up.railway.app
+  // For local development: http://localhost:3000
+  const BACKEND_URL = 'http://localhost:3000'; // Local development server
   console.log('[UI] Backend URL:', BACKEND_URL);
 
   // Store user email (from input field)
@@ -992,7 +992,7 @@
       parent.postMessage({
         pluginMessage: {
           type: 'start-complete-workflow',
-          concurrency: 16,  // Process 16 frames in parallel
+          concurrency: 3,  // Process 3 frames in parallel
           userEmail: currentUserEmail,
           generateImages: generateImages,
           promptFile: selectedPromptFile
