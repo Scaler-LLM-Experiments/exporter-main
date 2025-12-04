@@ -438,7 +438,7 @@ function hasImageFill(node: SceneNode): boolean {
 }
 
 // Export a single frame
-async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number, totalFrames: number, format: string, scale: number): Promise<void> {
+async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number, totalFrames: number, format: string, scale: number, workflowFrameId?: string): Promise<void> {
   figma.ui.postMessage({
     type: 'progress',
     message: `Exporting frame ${frameIndex + 1} of ${totalFrames}: ${frame.name}`
@@ -682,7 +682,8 @@ async function exportFrame(frame: FrameNode | ComponentNode, frameIndex: number,
     totalFrames,
     format,
     aiPromptTheme: aiPromptTheme || undefined,
-    aiPromptInstructions: aiPromptInstructions || undefined
+    aiPromptInstructions: aiPromptInstructions || undefined,
+    workflowFrameId: workflowFrameId || undefined  // Mark as workflow export if provided
   });
 }
 
@@ -2408,6 +2409,10 @@ interface PluginMessage {
   variants?: EditVariant[];
   processAllFrames?: boolean;
   frameVariants?: Array<{ frameId: string; frameName: string; variants: EditVariant[] }>;
+  concurrency?: number;
+  userEmail?: string;
+  generateImages?: boolean;
+  promptFile?: string;
 }
 
 figma.ui.onmessage = async (msg: PluginMessage) => {
@@ -2715,6 +2720,230 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
       figma.ui.postMessage({
         type: 'error',
         message: 'Failed to apply edits: ' + (error as Error).message
+      });
+    }
+    return;
+  }
+
+  // ============================================
+  // Complete Workflow: Rename → Variants → Export
+  // ============================================
+  if (msg.type === 'start-complete-workflow') {
+    try {
+      const selection = figma.currentPage.selection;
+      const frames = selection.filter(
+        node => node.type === 'FRAME' || node.type === 'COMPONENT'
+      ) as (FrameNode | ComponentNode)[];
+
+      if (frames.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Please select frames to process'
+        });
+        return;
+      }
+
+      const concurrency = msg.concurrency || 16;
+      const userEmail = msg.userEmail || '';
+      const generateImages = msg.generateImages || false;
+
+      console.log(`[Workflow] Starting: ${frames.length} frames, concurrency ${concurrency}`);
+
+      // Track workflow stats
+      let framesCompleted = 0;
+      let framesFailed = 0;
+      let variantsCreated = 0;
+      let zipsUploaded = 0;
+
+      // Process a single frame through the complete pipeline
+      async function processFrameComplete(frame: FrameNode | ComponentNode, frameIndex: number): Promise<void> {
+        try {
+          const frameName = frame.name;
+          console.log(`[Workflow] Frame ${frameIndex + 1}/${frames.length}: Starting ${frameName}`);
+
+          figma.ui.postMessage({
+            type: 'workflow-progress',
+            message: `[${frameIndex + 1}/${frames.length}] ${frameName}: Renaming layers...`
+          });
+
+          // STEP 1: Rename layers
+          const layerData = await exportLayersForRenaming(frame);
+
+          // Send to UI for AI rename
+          figma.ui.postMessage({
+            type: 'workflow-api-request',
+            api: 'rename',
+            frameId: frame.id,
+            frameName: frameName,
+            data: layerData
+          });
+
+          // Wait for rename response
+          const renames = await new Promise<Array<{ id: string; newName: string }>>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Rename timeout')), 120000);
+
+            const handler = (msg: any) => {
+              if (msg.type === 'workflow-api-response' && msg.frameId === frame.id && msg.api === 'rename') {
+                clearTimeout(timeout);
+                figma.ui.off('message', handler);
+                if (msg.error) {
+                  reject(new Error(msg.error));
+                } else {
+                  resolve(msg.data);
+                }
+              }
+            };
+
+            figma.ui.on('message', handler);
+          });
+
+          // Apply renames
+          await applyLayerRenames(renames);
+          console.log(`[Workflow] Frame ${frameName}: Renamed ${renames.length} layers`);
+
+          figma.ui.postMessage({
+            type: 'workflow-progress',
+            message: `[${frameIndex + 1}/${frames.length}] ${frameName}: Generating 10 variants...`
+          });
+
+          // STEP 2: Generate variants
+          const metadata = await extractLayerMetadataForEdits(frame);
+
+          // Export frame as 1x PNG for AI vision analysis
+          const frameImageBytes = await frame.exportAsync({
+            format: 'PNG',
+            constraint: { type: 'SCALE', value: 1 }
+          });
+          const frameImageBase64 = figma.base64Encode(frameImageBytes);
+
+          // Send to UI for AI variant generation (same format as prepare-for-edits)
+          figma.ui.postMessage({
+            type: 'workflow-api-request',
+            api: 'variants',
+            frameId: frame.id,
+            frameName: frameName,
+            data: {
+              frameId: frame.id,
+              frameName: frameName,
+              frameWidth: frame.width,
+              frameHeight: frame.height,
+              layers: metadata,
+              frameImageBase64: frameImageBase64
+            },
+            generateImages: generateImages
+          });
+
+          // Wait for variants response
+          const variants = await new Promise<EditVariant[]>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Variants timeout')), 180000);
+
+            const handler = (msg: any) => {
+              if (msg.type === 'workflow-api-response' && msg.frameId === frame.id && msg.api === 'variants') {
+                clearTimeout(timeout);
+                figma.ui.off('message', handler);
+                if (msg.error) {
+                  reject(new Error(msg.error));
+                } else {
+                  resolve(msg.data);
+                }
+              }
+            };
+
+            figma.ui.on('message', handler);
+          });
+
+          // Apply variants
+          await applyEditVariants(frame, variants);
+          variantsCreated += variants.length;
+          console.log(`[Workflow] Frame ${frameName}: Created ${variants.length} variants`);
+
+          figma.ui.postMessage({
+            type: 'workflow-progress',
+            message: `[${frameIndex + 1}/${frames.length}] ${frameName}: Exporting ${variants.length + 1} frames...`
+          });
+
+          // STEP 3: Export original + all variants
+          // Find all variant frames (they're siblings with naming pattern: frameName_v#_theme)
+          const parent = frame.parent;
+          const allFramesToExport: (FrameNode | ComponentNode)[] = [frame]; // Start with original
+
+          if (parent && 'children' in parent) {
+            for (const child of parent.children) {
+              if ((child.type === 'FRAME' || child.type === 'COMPONENT') && child.id !== frame.id) {
+                // Check if this is a variant of our frame
+                if (child.name.startsWith(`${frameName}_v`)) {
+                  allFramesToExport.push(child as FrameNode | ComponentNode);
+                }
+              }
+            }
+          }
+
+          // Export each frame (original + variants)
+          for (let i = 0; i < allFramesToExport.length; i++) {
+            const frameToExport = allFramesToExport[i];
+            await exportFrame(frameToExport, i, allFramesToExport.length, 'png', 2, frame.id);
+            console.log(`[Workflow] Frame ${frameName}: Exported ${i + 1}/${allFramesToExport.length}`);
+          }
+
+          zipsUploaded++;
+          framesCompleted++;
+
+          console.log(`[Workflow] ✓ Frame ${frameName} complete (${framesCompleted}/${frames.length})`);
+
+        } catch (error) {
+          console.error(`[Workflow] Frame ${frame.name} failed:`, error);
+          framesFailed++;
+
+          figma.ui.postMessage({
+            type: 'workflow-progress',
+            message: `[${frameIndex + 1}/${frames.length}] ${frame.name}: Failed - ${(error as Error).message}`
+          });
+        }
+      }
+
+      // Worker function to process frames from queue
+      async function worker(frameQueue: (FrameNode | ComponentNode)[], workerId: number): Promise<void> {
+        console.log(`[Worker ${workerId}] Started`);
+
+        while (frameQueue.length > 0) {
+          const frame = frameQueue.shift();
+          if (!frame) break;
+
+          const frameIndex = frames.indexOf(frame);
+          console.log(`[Worker ${workerId}] Processing frame ${frameIndex + 1}/${frames.length}: ${frame.name}`);
+
+          await processFrameComplete(frame, frameIndex);
+        }
+
+        console.log(`[Worker ${workerId}] Finished`);
+      }
+
+      // Create worker pool with shared queue
+      const frameQueue = [...frames];
+      const workers: Promise<void>[] = [];
+
+      for (let i = 0; i < concurrency; i++) {
+        workers.push(worker(frameQueue, i));
+      }
+
+      // Wait for all workers to complete
+      await Promise.all(workers);
+
+      console.log(`[Workflow] Complete: ${framesCompleted} succeeded, ${framesFailed} failed`);
+
+      // Send completion message
+      figma.ui.postMessage({
+        type: 'workflow-complete',
+        framesCompleted,
+        framesFailed,
+        variantsCreated,
+        zipsUploaded
+      });
+
+    } catch (error) {
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Workflow failed: ' + (error as Error).message
       });
     }
     return;

@@ -226,6 +226,30 @@
     margin-right: 0.375rem;
   }
 
+  /* Do Everything Button Styles */
+  #do-everything {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+  }
+
+  #do-everything:hover:not(:disabled) {
+    background: hsl(var(--primary) / 0.9);
+  }
+
+  #do-everything:active:not(:disabled) {
+    background: hsl(var(--primary) / 0.95);
+  }
+
+  #do-everything:disabled {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
   /* Generate Edits Button Styles */
   #generate-edits {
     background: hsl(var(--primary));
@@ -501,6 +525,23 @@
   <label for="generate-images">Generate AI Images</label>
 </div>
 
+<button id="do-everything">
+  <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
+    <path d="M 8 2 A 6 6 0 0 1 14 8" stroke-linecap="round" />
+  </svg>
+  <svg class="btn-icon check-icon hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M 3 8 L 6 11 L 13 4" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+  <span class="btn-text">Do Everything (Rename → Variants → Export)</span>
+</button>
+
+<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0, 0, 0, 0.1);">
+  <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: rgba(0, 0, 0, 0.5); margin-bottom: 12px;">
+    Individual Operations
+  </div>
+</div>
+
 <button id="ai-rename">
   <svg class="btn-icon spinner hidden" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
     <circle cx="8" cy="8" r="6" stroke-opacity="0.25" />
@@ -542,6 +583,7 @@
   const exportBtn = document.getElementById('export');
   const aiRenameBtn = document.getElementById('ai-rename');
   const generateEditsBtn = document.getElementById('generate-edits');
+  const doEverythingBtn = document.getElementById('do-everything');
   const breakGroupsBtn = document.getElementById('break-groups');
   const rasterizeBtn = document.getElementById('rasterize');
   const frameCountEl = document.getElementById('frame-count');
@@ -596,7 +638,9 @@
     const checkIcon = button.querySelector('.check-icon');
 
     let defaultText = 'Export Only';
-    if (button.id === 'ai-rename') {
+    if (button.id === 'do-everything') {
+      defaultText = 'Do Everything (Rename → Variants → Export)';
+    } else if (button.id === 'ai-rename') {
       defaultText = 'AI Rename Layers';
     } else if (button.id === 'generate-edits') {
       defaultText = 'Generate Edits (10 variants)';
@@ -920,6 +964,38 @@
     } catch (e) {
       console.error('Error during export:', e);
       setButtonState(exportBtn, 'default');
+      hideProgress();
+    }
+  };
+
+  // ============================================
+  // Do Everything Flow (Rename → Variants → Export)
+  // ============================================
+  doEverythingBtn.onclick = async () => {
+    console.log('Do Everything button clicked');
+    try {
+      setButtonState(doEverythingBtn, 'loading', 'Starting...');
+      showProgress('Starting complete workflow...');
+
+      // Check if AI images should be generated
+      const generateImagesCheckbox = document.getElementById('generate-images');
+      const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
+
+      // Start the complete workflow
+      parent.postMessage({
+        pluginMessage: {
+          type: 'start-complete-workflow',
+          concurrency: 16,  // Process 16 frames in parallel
+          userEmail: currentUserEmail,
+          generateImages: generateImages,
+          promptFile: selectedPromptFile
+        }
+      }, '*');
+
+    } catch (error) {
+      console.error('[UI] Do Everything error:', error);
+      alert(`Failed to start workflow: ${error.message}`);
+      setButtonState(doEverythingBtn, 'default');
       hideProgress();
     }
   };
@@ -1410,25 +1486,63 @@
           });
         }
 
-        // Store export data for this frame
-        frameExportData.push({
-          folderName: msg.folderName,
-          meta: msg.meta,
-          layers: msg.layers,
-          reconstructedBlob,
-          format: exportFormat,
-          frameIndex: msg.frameIndex,
-          totalFrames: msg.totalFrames,
-          aiPromptTheme: msg.aiPromptTheme,
-          aiPromptInstructions: msg.aiPromptInstructions
-        });
+        // Check if this is part of a workflow export (has workflowFrameId)
+        const isWorkflowExport = msg.workflowFrameId !== undefined;
 
-        console.log(`[UI] Collected frame ${msg.frameIndex + 1}/${msg.totalFrames}: ${msg.folderName}`);
+        if (isWorkflowExport) {
+          // WORKFLOW MODE: Create ZIP and upload to S3 immediately
+          console.log(`[Workflow Export] Processing frame: ${msg.folderName}`);
 
-        // If this is the last frame OR single frame, process immediately
-        if (msg.frameIndex + 1 === msg.totalFrames) {
-          // Don't process here - wait for 'all-exports-complete' message
-          console.log(`[UI] All ${msg.totalFrames} frames collected, waiting for completion signal...`);
+          const zip = new JSZip();
+          const folder = zip.folder(msg.folderName);
+
+          // Add reconstructed composite FIRST (as per required structure)
+          folder.file(`reconstructed.${exportFormat}`, reconstructedBlob);
+
+          // Add metadata
+          folder.file('meta.json', JSON.stringify(msg.meta, null, 2));
+
+          // Add layer images in layers/ subfolder
+          const layersFolder = folder.folder('layers');
+          for (const layer of msg.layers) {
+            layersFolder.file(layer.filename, layer.data, { base64: true });
+          }
+
+          // Generate ZIP
+          const zipBlob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 },
+            platform: 'UNIX'
+          });
+
+          console.log(`[Workflow Export] ZIP created: ${msg.folderName}.zip (${Math.round(zipBlob.size / 1024)}KB)`);
+
+          // Upload to S3 immediately
+          await uploadFrameToS3(msg.folderName, zipBlob, 1, currentUserEmail);
+          console.log(`[Workflow Export] ✓ Frame ${msg.folderName} uploaded to S3`);
+
+        } else {
+          // NORMAL MODE: Store for batch processing
+          frameExportData.push({
+            folderName: msg.folderName,
+            meta: msg.meta,
+            layers: msg.layers,
+            reconstructedBlob,
+            format: exportFormat,
+            frameIndex: msg.frameIndex,
+            totalFrames: msg.totalFrames,
+            aiPromptTheme: msg.aiPromptTheme,
+            aiPromptInstructions: msg.aiPromptInstructions
+          });
+
+          console.log(`[UI] Collected frame ${msg.frameIndex + 1}/${msg.totalFrames}: ${msg.folderName}`);
+
+          // If this is the last frame OR single frame, process immediately
+          if (msg.frameIndex + 1 === msg.totalFrames) {
+            // Don't process here - wait for 'all-exports-complete' message
+            console.log(`[UI] All ${msg.totalFrames} frames collected, waiting for completion signal...`);
+          }
         }
 
       } catch (error) {
@@ -1514,15 +1628,7 @@
               throw new Error(`Failed to create metadata file for ${frameData.folderName}: ` + e.message);
             }
 
-            frameZip.file(`${frameData.folderName}/meta.json`, metaJson);
-
-            // Add all layer files (PNG or SVG)
-            const layersFolder = frameZip.folder(`${frameData.folderName}/layers`);
-            for (const layer of frameData.layers) {
-              layersFolder.file(layer.filename, layer.data, { base64: true });
-            }
-
-            // Add reconstructed image with correct extension
+            // Add reconstructed image FIRST (as per required structure)
             const reconstructedExt = frameData.format === 'svg' ? '.svg' : '.png';
 
             // Validate reconstructed blob before adding
@@ -1531,9 +1637,18 @@
             }
 
             frameZip.file(
-              `${frameData.folderName}/${frameData.meta.component.name}_reconstructed${reconstructedExt}`,
+              `${frameData.folderName}/reconstructed${reconstructedExt}`,
               frameData.reconstructedBlob
             );
+
+            // Add metadata
+            frameZip.file(`${frameData.folderName}/meta.json`, metaJson);
+
+            // Add all layer files (PNG or SVG) in layers/ subfolder
+            const layersFolder = frameZip.folder(`${frameData.folderName}/layers`);
+            for (const layer of frameData.layers) {
+              layersFolder.file(layer.filename, layer.data, { base64: true });
+            }
 
             // Add AI prompt text file if available (from generated variants)
             if (frameData.aiPromptTheme || frameData.aiPromptInstructions) {
@@ -1675,6 +1790,87 @@
     }
 
     // ============================================
+    // Workflow API Request Handlers
+    // ============================================
+    if (msg.type === 'workflow-api-request') {
+      try {
+        if (msg.api === 'rename') {
+          // Call rename API
+          console.log(`[Workflow API] Renaming layers for ${msg.frameName}`);
+
+          // msg.data is the layerData object from exportLayersForRenaming
+          // It has structure: { layers: [...], frameImageBase64: '...' }
+          const result = await callRenamingAPI(msg.data.layers);
+
+          // Send response back to plugin
+          parent.postMessage({
+            pluginMessage: {
+              type: 'workflow-api-response',
+              api: 'rename',
+              frameId: msg.frameId,
+              data: result.layers
+            }
+          }, '*');
+        } else if (msg.api === 'variants') {
+          // Call variants API
+          console.log(`[Workflow API] Generating variants for ${msg.frameName}`);
+          const result = await callGenerateEditsAPI(
+            msg.frameName,
+            msg.data.frameWidth,
+            msg.data.frameHeight,
+            msg.data.layers,
+            msg.data.frameImageBase64,
+            msg.generateImages
+          );
+
+          // Send response back to plugin
+          parent.postMessage({
+            pluginMessage: {
+              type: 'workflow-api-response',
+              api: 'variants',
+              frameId: msg.frameId,
+              data: result.variants
+            }
+          }, '*');
+        }
+      } catch (error) {
+        console.error(`[Workflow API] Error:`, error);
+        // Send error response
+        parent.postMessage({
+          pluginMessage: {
+            type: 'workflow-api-response',
+            api: msg.api,
+            frameId: msg.frameId,
+            error: error.message
+          }
+        }, '*');
+      }
+      return;
+    }
+
+    // ============================================
+    // Workflow Progress/Complete Messages
+    // ============================================
+    if (msg.type === 'workflow-progress') {
+      // Update progress display
+      if (msg.message) {
+        showProgress(msg.message);
+      }
+      return;
+    }
+
+    if (msg.type === 'workflow-complete') {
+      setButtonState(doEverythingBtn, 'success');
+      showProgress(`✓ Complete! Processed ${msg.framesCompleted} frames (${msg.variantsCreated} variants, ${msg.zipsUploaded} ZIPs)`);
+
+      setTimeout(() => {
+        setButtonState(doEverythingBtn, 'default');
+        hideProgress();
+      }, 5000);
+      return;
+    }
+
+    // ============================================
     // Error Handler
     // ============================================
     if (msg.type === 'error') {
@@ -1682,6 +1878,7 @@
       setButtonState(exportBtn, 'default');
       setButtonState(aiRenameBtn, 'default');
       setButtonState(generateEditsBtn, 'default');
+      setButtonState(doEverythingBtn, 'default');
       setButtonState(breakGroupsBtn, 'default');
       setButtonState(rasterizeBtn, 'default');
       hideProgress();
