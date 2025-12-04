@@ -2870,6 +2870,11 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
           if (parent && 'children' in parent) {
             for (const child of parent.children) {
               if ((child.type === 'FRAME' || child.type === 'COMPONENT') && child.id !== frame.id) {
+                // Skip prompt cards (they're visual guides, not meant for export)
+                if (child.name.includes('_prompt_card')) {
+                  continue;
+                }
+
                 // Check if this is a variant of our frame
                 if (child.name.startsWith(`${frameName}_v`)) {
                   allFramesToExport.push(child as FrameNode | ComponentNode);
@@ -2879,13 +2884,41 @@ figma.ui.onmessage = async (msg: PluginMessage) => {
           }
 
           // Export each frame (original + variants)
+          // Remove workflowFrameId to use batch mode (UI will group by serial number)
           for (let i = 0; i < allFramesToExport.length; i++) {
             const frameToExport = allFramesToExport[i];
-            await exportFrame(frameToExport, i, allFramesToExport.length, 'png', 2, frame.id);
+            await exportFrame(frameToExport, i, allFramesToExport.length, 'png', 2);
             console.log(`[Workflow] Frame ${frameName}: Exported ${i + 1}/${allFramesToExport.length}`);
           }
 
-          zipsUploaded++;
+          // Send completion message to trigger ZIP creation and S3 upload
+          figma.ui.postMessage({
+            type: 'all-exports-complete',
+            totalFrames: allFramesToExport.length
+          });
+
+          console.log(`[Workflow] Frame ${frameName}: Sent all-exports-complete for ${allFramesToExport.length} frames`);
+
+          // Wait for ZIP upload confirmation
+          await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              console.warn(`[Workflow] Upload timeout for ${frameName}`);
+              resolve(); // Don't fail the workflow if upload times out
+            }, 60000);
+
+            const handler = (msg: any) => {
+              if (msg.type === 'workflow-zip-uploaded' && msg.frameName === frameName) {
+                clearTimeout(timeout);
+                figma.ui.off('message', handler);
+                zipsUploaded++;
+                console.log(`[Workflow] ✓ ZIP uploaded for ${frameName} (${zipsUploaded} total)`);
+                resolve();
+              }
+            };
+
+            figma.ui.on('message', handler);
+          });
+
           framesCompleted++;
 
           console.log(`[Workflow] ✓ Frame ${frameName} complete (${framesCompleted}/${frames.length})`);

@@ -614,6 +614,10 @@
   // Store multiple frame exports (for single ZIP with folders)
   let frameExportData = [];
 
+  // Workflow state tracking for incremental processing
+  let workflowActive = false;
+  let workflowFramesRemaining = 0;
+
   // Helper to create filename from layer name (matching code.ts logic)
   function createFilename(name, id, ext = 'png') {
     // Sanitize the layer name: remove/replace invalid filename characters
@@ -977,6 +981,9 @@
       setButtonState(doEverythingBtn, 'loading', 'Starting...');
       showProgress('Starting complete workflow...');
 
+      // Activate workflow mode for incremental processing
+      workflowActive = true;
+
       // Check if AI images should be generated
       const generateImagesCheckbox = document.getElementById('generate-images');
       const generateImages = generateImagesCheckbox ? generateImagesCheckbox.checked : false;
@@ -997,6 +1004,7 @@
       alert(`Failed to start workflow: ${error.message}`);
       setButtonState(doEverythingBtn, 'default');
       hideProgress();
+      workflowActive = false;  // Reset on error
     }
   };
 
@@ -1576,7 +1584,14 @@
           throw new Error('No frame data to export');
         }
 
-        showProgress('Creating ZIP file...');
+        // In workflow mode, process incrementally and skip parent ZIP download
+        const isWorkflowMode = workflowActive;
+
+        if (isWorkflowMode) {
+          showProgress('Processing frame group...');
+        } else {
+          showProgress('Creating ZIP file...');
+        }
 
         const totalFrames = frameExportData.length;
 
@@ -1597,8 +1612,8 @@
 
         console.log(`[UI] Grouped ${totalFrames} frames into ${Object.keys(frameGroups).length} base frame(s)`);
 
-        // Create parent ZIP
-        const parentZip = new JSZip();
+        // Create parent ZIP (skip in workflow mode - we only upload to S3)
+        const parentZip = isWorkflowMode ? null : new JSZip();
         const baseFrameNames = Object.keys(frameGroups);
 
         // Create a frame-level ZIP for each base frame
@@ -1680,14 +1695,37 @@
             platform: 'UNIX'
           });
 
-          // Add frame-level ZIP to parent ZIP
-          parentZip.file(`${baseFrameName}.zip`, frameZipBlob);
-          console.log(`[UI] Added ${baseFrameName}.zip to parent ZIP`);
+          // Add frame-level ZIP to parent ZIP (skip in workflow mode)
+          if (!isWorkflowMode) {
+            parentZip.file(`${baseFrameName}.zip`, frameZipBlob);
+            console.log(`[UI] Added ${baseFrameName}.zip to parent ZIP`);
+          }
 
           // Upload frame ZIP to S3
-          await uploadFrameToS3(baseFrameName, frameZipBlob, variants.length, currentUserEmail);
+          const uploadResult = await uploadFrameToS3(baseFrameName, frameZipBlob, variants.length, currentUserEmail);
+
+          // In workflow mode, notify plugin of successful upload
+          if (isWorkflowMode && uploadResult) {
+            parent.postMessage({
+              pluginMessage: {
+                type: 'workflow-zip-uploaded',
+                frameName: baseFrameName
+              }
+            }, '*');
+          }
         }
 
+        // In workflow mode, skip download and just clear data
+        if (isWorkflowMode) {
+          // Clear stored data for next frame group
+          frameExportData = [];
+          console.log(`[UI] Workflow: Processed ${baseFrameNames.length} frame group(s), cleared data for next batch`);
+
+          // Don't hide progress or set button state - workflow continues
+          return;
+        }
+
+        // Regular export mode: create parent ZIP and download
         // Determine parent ZIP filename
         let zipFilename;
         if (baseFrameNames.length === 1) {
@@ -1860,6 +1898,9 @@
     }
 
     if (msg.type === 'workflow-complete') {
+      // Reset workflow state
+      workflowActive = false;
+
       setButtonState(doEverythingBtn, 'success');
       showProgress(`✓ Complete! Processed ${msg.framesCompleted} frames (${msg.variantsCreated} variants, ${msg.zipsUploaded} ZIPs)`);
 
